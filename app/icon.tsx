@@ -3,7 +3,12 @@ import { ImageResponse } from "next/og";
 export const size = { width: 32, height: 32 };
 export const contentType = "image/png";
 
-export default function Icon() {
+export default async function Icon() {
+  // Load Playfair Display Bold from Google Fonts
+  const fontData = await fetch(
+    "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKeiukDQ.ttf"
+  ).then((res) => res.arrayBuffer());
+
   return new ImageResponse(
     (
       <div
@@ -15,15 +20,15 @@ export default function Icon() {
           justifyContent: "center",
           backgroundColor: "#0c6e4f",
           borderRadius: "6px",
-          fontFamily: "serif",
         }}
       >
         <span
           style={{
+            fontFamily: "Playfair Display",
             color: "white",
-            fontSize: "18px",
-            fontWeight: 800,
-            letterSpacing: "-0.5px",
+            fontSize: "19px",
+            fontWeight: 700,
+            letterSpacing: "-1px",
             lineHeight: 1,
           }}
         >
@@ -31,6 +36,16 @@ export default function Icon() {
         </span>
       </div>
     ),
-    { ...size }
+    {
+      ...size,
+      fonts: [
+        {
+          name: "Playfair Display",
+          data: fontData,
+          style: "normal",
+          weight: 700,
+        },
+      ],
+    }
   );
 }

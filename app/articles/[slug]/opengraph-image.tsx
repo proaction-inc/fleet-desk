@@ -8,6 +8,9 @@ export const size = {
 };
 export const contentType = "image/png";
 
+const PLAYFAIR_URL =
+  "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKeiukDQ.ttf";
+
 function formatDate(dateString: string): string {
   return new Date(dateString).toLocaleDateString("en-US", {
     year: "numeric",
@@ -16,13 +19,24 @@ function formatDate(dateString: string): string {
   });
 }
 
-export default async function Image({
+export default async function OGImage({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
   const article = await getArticleBySlug(slug);
+
+  const fontData = await fetch(PLAYFAIR_URL).then((res) => res.arrayBuffer());
+
+  const fonts = [
+    {
+      name: "Playfair Display",
+      data: fontData,
+      style: "normal" as const,
+      weight: 700 as const,
+    },
+  ];
 
   if (!article) {
     return new ImageResponse(
@@ -35,6 +49,7 @@ export default async function Image({
             alignItems: "center",
             justifyContent: "center",
             backgroundColor: "#0c6e4f",
+            fontFamily: "Playfair Display",
             color: "white",
             fontSize: 48,
             fontWeight: 700,
@@ -43,7 +58,7 @@ export default async function Image({
           The Fleet Desk
         </div>
       ),
-      { ...size }
+      { ...size, fonts }
     );
   }
 
@@ -58,6 +73,7 @@ export default async function Image({
           backgroundColor: "#0c6e4f",
           padding: "60px",
           position: "relative",
+          fontFamily: "Playfair Display",
         }}
       >
         {/* Top row: logo left, category right */}
@@ -69,38 +85,30 @@ export default async function Image({
             width: "100%",
           }}
         >
-          {/* Logo */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              gap: "8px",
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "baseline", gap: "8px" }}>
             <span
               style={{
-                fontSize: 20,
+                fontSize: 18,
                 color: "rgba(255, 255, 255, 0.7)",
-                fontWeight: 400,
+                fontWeight: 700,
                 textTransform: "uppercase",
-                letterSpacing: "0.1em",
+                letterSpacing: "0.15em",
               }}
             >
               THE
             </span>
             <span
               style={{
-                fontSize: 28,
+                fontSize: 30,
                 color: "white",
                 fontWeight: 700,
-                letterSpacing: "-0.01em",
+                letterSpacing: "-0.02em",
               }}
             >
               Fleet Desk
             </span>
           </div>
 
-          {/* Category badge */}
           <div
             style={{
               display: "flex",
@@ -109,19 +117,13 @@ export default async function Image({
               padding: "8px 20px",
             }}
           >
-            <span
-              style={{
-                fontSize: 16,
-                color: "white",
-                fontWeight: 500,
-              }}
-            >
+            <span style={{ fontSize: 16, color: "white", fontWeight: 700 }}>
               {article.topic}
             </span>
           </div>
         </div>
 
-        {/* Title — centered in remaining space */}
+        {/* Title */}
         <div
           style={{
             display: "flex",
@@ -134,7 +136,12 @@ export default async function Image({
         >
           <div
             style={{
-              fontSize: article.title.length > 80 ? 40 : article.title.length > 50 ? 48 : 56,
+              fontSize:
+                article.title.length > 80
+                  ? 40
+                  : article.title.length > 50
+                    ? 48
+                    : 56,
               fontWeight: 700,
               color: "white",
               lineHeight: 1.2,
@@ -164,7 +171,7 @@ export default async function Image({
             style={{
               fontSize: 18,
               color: "rgba(255, 255, 255, 0.85)",
-              fontWeight: 500,
+              fontWeight: 700,
             }}
           >
             {article.author}
@@ -174,7 +181,7 @@ export default async function Image({
               style={{
                 fontSize: 18,
                 color: "rgba(255, 255, 255, 0.6)",
-                fontWeight: 400,
+                fontWeight: 700,
               }}
             >
               {formatDate(article.published_at)}
@@ -182,7 +189,7 @@ export default async function Image({
           )}
         </div>
 
-        {/* Subtle bottom accent line */}
+        {/* Bottom accent line */}
         <div
           style={{
             position: "absolute",
@@ -196,6 +203,6 @@ export default async function Image({
         />
       </div>
     ),
-    { ...size }
+    { ...size, fonts }
   );
 }
