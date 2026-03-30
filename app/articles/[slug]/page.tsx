@@ -7,8 +7,10 @@ import {
   getArticleSources,
 } from "@/lib/supabase/queries";
 import { timeAgo, estimateReadingTime } from "@/lib/utils";
+import type { ArticleSection } from "@/lib/supabase/types";
 import ArticleCard from "@/components/articles/ArticleCard";
 import ShareButtons from "@/components/articles/ShareButtons";
+import { SourceCirclesClickable } from "@/components/articles/SourcesModal";
 import ArticleSections from "@/components/articles/ArticleSections";
 import FollowUpChat from "@/components/articles/FollowUpChat";
 import Image from "next/image";
@@ -94,7 +96,7 @@ export default async function ArticlePage({
             </h1>
 
             {/* Meta line */}
-            <div className="flex items-center gap-2 text-sm text-muted">
+            <div className="flex items-center gap-2 text-sm text-muted mb-3">
               <span className="font-medium text-foreground/80">
                 {article.author}
               </span>
@@ -107,6 +109,16 @@ export default async function ArticlePage({
               )}
               <span>{estimateReadingTime(article.content)}</span>
             </div>
+
+            {/* Source circles — clickable to open sources modal */}
+            {sources.length > 0 && (
+              <div className="flex items-center">
+                <SourceCirclesClickable
+                  sources={sources}
+                  sourceCount={article.source_count ?? sources.length}
+                />
+              </div>
+            )}
           </header>
 
           {/* Excerpt / summary */}
