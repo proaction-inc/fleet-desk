@@ -5,9 +5,10 @@ import type { ArticleSource } from "@/lib/supabase/types";
 
 // Domain color mapping
 const domainColors: Record<string, string> = {
+  "thefleetdesk.com": "#0c6e4f",
   "ttnews.com": "#dc2626",
   "freightwaves.com": "#2563eb",
-  "fleetowner.com": "#0c6e4f",
+  "fleetowner.com": "#16a34a",
   "ccjdigital.com": "#7c3aed",
   "fmcsa.dot.gov": "#1d4ed8",
   "samsara.com": "#059669",
