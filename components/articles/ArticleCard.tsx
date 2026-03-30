@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import type { Article } from "@/lib/supabase/types";
@@ -12,6 +13,49 @@ const categoryGradients: Record<string, string> = {
   "Fleet Safety": "from-emerald-600/30 to-emerald-900/60",
   "Industry Deals": "from-purple-600/30 to-purple-900/60",
 };
+
+// Generate consistent source domain colors from the topic
+const domainColors: Record<string, string> = {
+  "Fleet Management & Technology": "#3b82f6",
+  "Regulatory & Compliance": "#f59e0b",
+  "Fleet Safety": "#10b981",
+  "Industry Deals": "#8b5cf6",
+};
+
+// Simulated source domains based on topic (until real sources are loaded per-card)
+const topicSources: Record<string, string[]> = {
+  "Fleet Management & Technology": ["freightwaves.com", "fleetowner.com", "ccjdigital.com", "samsara.com"],
+  "Regulatory & Compliance": ["fmcsa.dot.gov", "ttnews.com", "freightwaves.com", "trucking.org"],
+  "Fleet Safety": ["fleetowner.com", "ttnews.com", "samsara.com", "nsc.org"],
+  "Industry Deals": ["ttnews.com", "freightwaves.com", "ccjdigital.com", "pwc.com"],
+};
+
+function SourceCircles({ topic, count }: { topic: string; count: number }) {
+  const sources = topicSources[topic] ?? ["source.com"];
+  const displaySources = sources.slice(0, Math.min(3, count));
+  const color = domainColors[topic] ?? "#64748b";
+
+  return (
+    <div className="flex items-center">
+      {/* Stacked source circles */}
+      <div className="flex -space-x-1.5">
+        {displaySources.map((domain, i) => (
+          <div
+            key={domain}
+            className="w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-[8px] font-bold text-white"
+            style={{ backgroundColor: color, opacity: 1 - i * 0.15, zIndex: 10 - i }}
+            title={domain}
+          >
+            {domain.charAt(0).toUpperCase()}
+          </div>
+        ))}
+      </div>
+      <span className="ml-2 text-xs text-muted">
+        {count} sources
+      </span>
+    </div>
+  );
+}
 
 function ArticleImage({
   article,
@@ -48,10 +92,9 @@ export default function ArticleCard({
   article: Article;
   variant?: "card" | "feed";
   featured?: boolean;
-  /** @deprecated — no longer used, kept for backward compat */
-  size?: "default" | "small";
 }) {
-  const sourceCount = article.source_count;
+  const [liked, setLiked] = useState(false);
+  const sourceCount = article.source_count ?? 0;
 
   // Feed variant — horizontal layout used on /articles page
   if (variant === "feed") {
@@ -73,23 +116,14 @@ export default function ArticleCard({
             <h3 className="font-serif text-xl md:text-2xl font-bold leading-snug tracking-tight group-hover:text-accent transition-colors mb-2">
               {article.title}
             </h3>
-            <p className="text-sm text-muted leading-relaxed line-clamp-2 mb-2">
+            <p className="text-sm text-muted leading-relaxed line-clamp-2 mb-3">
               {article.excerpt}
             </p>
-            <div className="flex items-center gap-2 text-xs text-muted">
-              <span className="font-medium text-foreground/80">
-                {article.author}
-              </span>
-              <span>&middot;</span>
-              <span>{estimateReadingTime(article.content)}</span>
-              {sourceCount != null && sourceCount > 0 && (
-                <>
-                  <span>&middot;</span>
-                  <span className="text-accent font-medium">
-                    {sourceCount} sources
-                  </span>
-                </>
+            <div className="flex items-center gap-3">
+              {sourceCount > 0 && (
+                <SourceCircles topic={article.topic} count={sourceCount} />
               )}
+              <span className="text-xs text-muted">{estimateReadingTime(article.content)}</span>
             </div>
           </div>
           <ArticleImage
@@ -104,8 +138,9 @@ export default function ArticleCard({
   // Card variant — Perplexity Discover style (default)
   return (
     <article
-      className={`group ${featured ? "col-span-1 md:col-span-2" : ""}`}
+      className={`group relative ${featured ? "col-span-1 md:col-span-2" : ""}`}
     >
+      {/* Main clickable area */}
       <Link href={`/articles/${article.slug}`} className="block">
         {/* Hero image */}
         <ArticleImage
@@ -124,84 +159,75 @@ export default function ArticleCard({
           {article.title}
         </h3>
 
-        {/* Timestamp */}
-        <p className="text-xs text-muted mb-1.5">
-          {article.published_at ? timeAgo(article.published_at) : "Draft"}
-        </p>
+        {/* Source circles + timestamp row */}
+        <div className="flex items-center gap-3 mb-1.5">
+          {sourceCount > 0 && (
+            <SourceCircles topic={article.topic} count={sourceCount} />
+          )}
+          {article.published_at && (
+            <>
+              {sourceCount > 0 && <span className="text-muted/30">|</span>}
+              <span className="text-xs text-muted">
+                {timeAgo(article.published_at)}
+              </span>
+            </>
+          )}
+        </div>
 
         {/* Excerpt */}
         <p className="text-sm text-muted leading-relaxed line-clamp-2 mb-3">
           {article.excerpt}
         </p>
-
-        {/* Bottom row: source count, like, actions */}
-        <div className="flex items-center gap-3">
-          {sourceCount != null && sourceCount > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-accent bg-accent/10 px-2 py-0.5 rounded-full">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="shrink-0"
-              >
-                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
-              </svg>
-              {sourceCount} sources
-            </span>
-          )}
-
-          <div className="ml-auto flex items-center gap-2">
-            {/* Like button */}
-            <button
-              type="button"
-              className="p-1.5 rounded-full text-muted hover:text-red-500 hover:bg-red-50 transition-colors"
-              aria-label="Like"
-              onClick={(e) => e.preventDefault()}
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-              </svg>
-            </button>
-
-            {/* Actions menu button */}
-            <button
-              type="button"
-              className="p-1.5 rounded-full text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
-              aria-label="More actions"
-              onClick={(e) => e.preventDefault()}
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="1" />
-                <circle cx="12" cy="5" r="1" />
-                <circle cx="12" cy="19" r="1" />
-              </svg>
-            </button>
-          </div>
-        </div>
       </Link>
+
+      {/* Action buttons — OUTSIDE the link so clicks don't navigate */}
+      <div className="flex items-center justify-end gap-1">
+        {/* Like / heart button */}
+        <button
+          type="button"
+          className={`p-1.5 rounded-full transition-colors ${
+            liked
+              ? "text-red-500 bg-red-50"
+              : "text-muted hover:text-red-500 hover:bg-red-50"
+          }`}
+          aria-label={liked ? "Unlike" : "Like"}
+          onClick={() => setLiked(!liked)}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill={liked ? "currentColor" : "none"}
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+          </svg>
+        </button>
+
+        {/* Three dots actions menu */}
+        <button
+          type="button"
+          className="p-1.5 rounded-full text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
+          aria-label="More actions"
+          onClick={() => {
+            // Future: open a dropdown with Share, Bookmark, Report options
+          }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+          >
+            <circle cx="12" cy="5" r="2" />
+            <circle cx="12" cy="12" r="2" />
+            <circle cx="12" cy="19" r="2" />
+          </svg>
+        </button>
+      </div>
     </article>
   );
 }
