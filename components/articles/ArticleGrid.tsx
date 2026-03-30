@@ -3,10 +3,10 @@ import ArticleCard from "./ArticleCard";
 
 export default function ArticleGrid({
   articles,
-  variant = "grid",
+  variant = "card",
 }: {
   articles: Article[];
-  variant?: "grid" | "feed";
+  variant?: "card" | "feed";
 }) {
   if (articles.length === 0) {
     return (
@@ -27,9 +27,9 @@ export default function ArticleGrid({
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-      {articles.map((article) => (
-        <ArticleCard key={article.id} article={article} />
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {articles.map((article, i) => (
+        <ArticleCard key={article.id} article={article} featured={i === 0} />
       ))}
     </div>
   );

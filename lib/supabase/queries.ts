@@ -1,6 +1,6 @@
 import { unstable_cache } from "next/cache";
 import { supabaseAdmin } from "./client";
-import type { Article } from "./types";
+import type { Article, ArticleSource } from "./types";
 
 async function _fetchPublishedArticles(): Promise<Article[]> {
   const { data, error } = await supabaseAdmin
@@ -69,6 +69,28 @@ export async function getRelatedArticles(
     },
     ["fleet-desk-related", currentSlug, topic],
     { tags: ["articles"], revalidate: 300 }
+  )();
+}
+
+export async function getArticleSources(
+  articleId: string
+): Promise<ArticleSource[]> {
+  return unstable_cache(
+    async () => {
+      const { data, error } = await supabaseAdmin
+        .from("article_sources")
+        .select("*")
+        .eq("article_id", articleId)
+        .order("section_index", { ascending: true });
+
+      if (error) {
+        console.error("Error fetching article sources:", error);
+        return [];
+      }
+      return data ?? [];
+    },
+    ["fleet-desk-sources", articleId],
+    { tags: ["articles", `article-sources-${articleId}`], revalidate: 300 }
   )();
 }
 

@@ -9,6 +9,8 @@ export interface Article {
   published: boolean;
   published_at: string | null;
   featured_image_url: string | null;
+  source_count: number | null;
+  sections: ArticleSection[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +55,23 @@ export interface NewsletterEdition {
   sent: boolean;
   sent_at: string | null;
   created_at: string;
+}
+
+export interface ArticleSource {
+  id: string;
+  article_id: string;
+  title: string;
+  url: string;
+  domain: string;
+  snippet: string | null;
+  section_index: number;
+  created_at: string;
+}
+
+export interface ArticleSection {
+  heading: string;
+  content: string;
+  source_domains: string[];
 }
 
 export const CATEGORIES = [
