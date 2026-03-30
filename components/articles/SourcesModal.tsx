@@ -3,27 +3,42 @@
 import { useState } from "react";
 import type { ArticleSource } from "@/lib/supabase/types";
 
-// Domain color mapping
-const domainColors: Record<string, string> = {
-  "thefleetdesk.com": "#0c6e4f",
-  "ttnews.com": "#dc2626",
-  "freightwaves.com": "#2563eb",
-  "fleetowner.com": "#16a34a",
-  "ccjdigital.com": "#7c3aed",
-  "fmcsa.dot.gov": "#1d4ed8",
-  "samsara.com": "#059669",
-  "trucking.org": "#b45309",
-  "pwc.com": "#dc2626",
-  "nsc.org": "#0369a1",
-};
-
-function getDomainColor(domain: string): string {
+/**
+ * Get a favicon/logo URL for any domain.
+ * - For The Fleet Desk, use our own favicon
+ * - For external domains, use Google's favicon service (returns real logos)
+ */
+function getDomainLogoUrl(domain: string, size: number = 32): string {
   const clean = domain.replace(/^www\./, "");
-  return domainColors[clean] ?? "#64748b";
+  if (clean === "thefleetdesk.com") {
+    return "/icon"; // Our generated favicon route
+  }
+  // Google's favicon service — works for any domain, returns the actual site logo
+  return `https://www.google.com/s2/favicons?domain=${clean}&sz=${size}`;
 }
 
-function getDomainInitial(domain: string): string {
-  return domain.replace(/^www\./, "").charAt(0).toUpperCase();
+function SourceLogo({
+  domain,
+  size = 20,
+  className = "",
+}: {
+  domain: string;
+  size?: number;
+  className?: string;
+}) {
+  const clean = domain.replace(/^www\./, "");
+  const isFleetDesk = clean === "thefleetdesk.com";
+
+  return (
+    <img
+      src={getDomainLogoUrl(clean, size * 2)}
+      alt={clean}
+      width={size}
+      height={size}
+      className={`rounded-full object-cover ${isFleetDesk ? "bg-accent" : "bg-white"} ${className}`}
+      style={{ width: size, height: size }}
+    />
+  );
 }
 
 export function SourceCirclesClickable({
@@ -37,7 +52,9 @@ export function SourceCirclesClickable({
   const displayCount = sourceCount || sources.length;
 
   // Get unique domains for circles
-  const uniqueDomains = [...new Set(sources.map((s) => s.domain.replace(/^www\./, "")))];
+  const uniqueDomains = [
+    ...new Set(sources.map((s) => s.domain.replace(/^www\./, ""))),
+  ];
   const displayDomains = uniqueDomains.slice(0, 4);
 
   if (displayCount === 0) return null;
@@ -54,18 +71,15 @@ export function SourceCirclesClickable({
           {displayDomains.map((domain, i) => (
             <div
               key={domain}
-              className="w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-[8px] font-bold text-white"
-              style={{
-                backgroundColor: getDomainColor(domain),
-                zIndex: 10 - i,
-              }}
+              className="rounded-full border-2 border-white overflow-hidden"
+              style={{ zIndex: 10 - i }}
             >
-              {getDomainInitial(domain)}
+              <SourceLogo domain={domain} size={20} />
             </div>
           ))}
         </div>
         <span className="text-xs font-medium text-muted hover:text-foreground transition-colors">
-          {displayCount} sources
+          {displayCount} {displayCount === 1 ? "source" : "sources"}
         </span>
       </button>
 
@@ -98,14 +112,23 @@ export function SourceCirclesClickable({
                   <circle cx="12" cy="12" r="10" />
                   <path d="M12 6v6l4 2" />
                 </svg>
-                <span className="font-bold text-lg">{displayCount} sources</span>
+                <span className="font-bold text-lg">
+                  {displayCount} {displayCount === 1 ? "source" : "sources"}
+                </span>
               </div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 className="p-1.5 rounded-full hover:bg-surface-hover transition-colors text-muted hover:text-foreground"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
               </button>
@@ -123,14 +146,9 @@ export function SourceCirclesClickable({
                     rel="noopener noreferrer"
                     className="block px-5 py-4 hover:bg-surface transition-colors"
                   >
-                    {/* Domain badge */}
-                    <div className="flex items-center gap-2 mb-2">
-                      <div
-                        className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
-                        style={{ backgroundColor: getDomainColor(cleanDomain) }}
-                      >
-                        {getDomainInitial(cleanDomain)}
-                      </div>
+                    {/* Domain badge with real logo */}
+                    <div className="flex items-center gap-2.5 mb-2">
+                      <SourceLogo domain={cleanDomain} size={24} />
                       <span className="text-sm font-medium text-muted">
                         {cleanDomain}
                       </span>

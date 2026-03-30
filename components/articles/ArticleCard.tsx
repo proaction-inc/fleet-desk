@@ -14,44 +14,29 @@ const categoryGradients: Record<string, string> = {
   "Industry Deals": "from-purple-600/30 to-purple-900/60",
 };
 
-// Generate consistent source domain colors from the topic
-const domainColors: Record<string, string> = {
-  "Fleet Management & Technology": "#3b82f6",
-  "Regulatory & Compliance": "#f59e0b",
-  "Fleet Safety": "#10b981",
-  "Industry Deals": "#8b5cf6",
-};
-
-// Simulated source domains based on topic (until real sources are loaded per-card)
-const topicSources: Record<string, string[]> = {
-  "Fleet Management & Technology": ["freightwaves.com", "fleetowner.com", "ccjdigital.com", "samsara.com"],
-  "Regulatory & Compliance": ["fmcsa.dot.gov", "ttnews.com", "freightwaves.com", "trucking.org"],
-  "Fleet Safety": ["fleetowner.com", "ttnews.com", "samsara.com", "nsc.org"],
-  "Industry Deals": ["ttnews.com", "freightwaves.com", "ccjdigital.com", "pwc.com"],
-};
-
-function SourceCircles({ topic, count }: { topic: string; count: number }) {
-  const sources = topicSources[topic] ?? ["source.com"];
-  const displaySources = sources.slice(0, Math.min(3, count));
-  const color = domainColors[topic] ?? "#64748b";
-
+function SourceCircles({ count }: { count: number }) {
+  // For now, all articles source from The Fleet Desk
+  // When the content engine runs, this will show real external logos
   return (
     <div className="flex items-center">
-      {/* Stacked source circles */}
       <div className="flex -space-x-1.5">
-        {displaySources.map((domain, i) => (
-          <div
-            key={domain}
-            className="w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-[8px] font-bold text-white"
-            style={{ backgroundColor: color, opacity: 1 - i * 0.15, zIndex: 10 - i }}
-            title={domain}
-          >
-            {domain.charAt(0).toUpperCase()}
-          </div>
-        ))}
+        <div
+          className="rounded-full border-2 border-white overflow-hidden"
+          style={{ zIndex: 10 }}
+        >
+          {/* Use our own favicon for Fleet Desk */}
+          <img
+            src="/icon"
+            alt="The Fleet Desk"
+            width={20}
+            height={20}
+            className="rounded-full bg-accent"
+            style={{ width: 20, height: 20 }}
+          />
+        </div>
       </div>
       <span className="ml-2 text-xs text-muted">
-        {count} sources
+        {count} {count === 1 ? "source" : "sources"}
       </span>
     </div>
   );
@@ -121,7 +106,7 @@ export default function ArticleCard({
             </p>
             <div className="flex items-center gap-3">
               {sourceCount > 0 && (
-                <SourceCircles topic={article.topic} count={sourceCount} />
+                <SourceCircles count={sourceCount} />
               )}
               <span className="text-xs text-muted">{estimateReadingTime(article.content)}</span>
             </div>
@@ -162,7 +147,7 @@ export default function ArticleCard({
         {/* Source circles + timestamp row */}
         <div className="flex items-center gap-3 mb-1.5">
           {sourceCount > 0 && (
-            <SourceCircles topic={article.topic} count={sourceCount} />
+            <SourceCircles count={sourceCount} />
           )}
           {article.published_at && (
             <>
