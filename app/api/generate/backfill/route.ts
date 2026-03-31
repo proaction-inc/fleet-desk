@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabase/client";
+import { buildSynthesisPrompt } from "@/lib/synthesis-prompt";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -205,35 +206,7 @@ async function synthesizeArticle(
     )
     .join("\n\n");
 
-  const prompt = `You are a senior fleet industry journalist writing for The Fleet Desk. Synthesize these source articles into a comprehensive news article. The article should read as if it was published around ${targetDate}.
-
-SOURCE ARTICLES:
-${sourceSummaries}
-
-INSTRUCTIONS:
-1. Write 800-1500 words of original, well-researched prose
-2. Use HTML: <h2> for sections, <p> for paragraphs, <ul>/<li> for lists, <strong> for emphasis
-3. Include 3-4 sections with <h2> headers
-4. Professional but accessible journalistic tone
-5. Include specific numbers, companies, and details from sources
-6. Add context about why this matters to fleet managers
-
-RESPOND IN EXACTLY THIS JSON FORMAT (no markdown):
-{
-  "title": "Compelling headline (max 80 chars)",
-  "slug": "url-friendly-slug",
-  "excerpt": "1-2 sentence summary (max 200 chars)",
-  "content": "<h2>Section</h2><p>Content...</p>",
-  "topic": "One of: Fleet Management & Technology, Regulatory & Compliance, Fleet Safety, Industry Deals",
-  "sources": [
-    {
-      "title": "Source article title",
-      "url": "https://source-url.com",
-      "domain": "domain.com",
-      "snippet": "What this source contributed"
-    }
-  ]
-}`;
+  const prompt = buildSynthesisPrompt(sourceSummaries, targetDate);
 
   try {
     const response = await anthropic.messages.create({

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabase/client";
 import { RSS_SOURCES } from "@/lib/rss-sources";
+import { buildSynthesisPrompt } from "@/lib/synthesis-prompt";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -220,36 +221,7 @@ async function synthesizeArticle(
     )
     .join("\n\n");
 
-  const prompt = `You are a senior fleet industry journalist writing for The Fleet Desk, an independent fleet industry news publication. Your job is to synthesize the following source articles into a single, comprehensive news article.
-
-SOURCE ARTICLES:
-${sourceSummaries}
-
-INSTRUCTIONS:
-1. Write a comprehensive article that synthesizes information from ALL provided sources
-2. The article should be 800-1500 words of original prose — NOT a copy of any source
-3. Use HTML formatting: <h2> for section headers, <p> for paragraphs, <ul>/<li> for lists, <strong> for emphasis
-4. Include 3-4 distinct sections with <h2> headers
-5. Write in a professional but accessible journalistic tone
-6. Include specific numbers, company names, and details from the sources
-7. Add context and analysis that helps fleet managers understand why this matters
-
-RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, just raw JSON):
-{
-  "title": "Compelling headline (max 80 chars)",
-  "slug": "url-friendly-slug-with-hyphens",
-  "excerpt": "1-2 sentence summary for cards and SEO (max 200 chars)",
-  "content": "<h2>First Section</h2><p>Content...</p><h2>Second Section</h2><p>Content...</p>",
-  "topic": "One of: Fleet Management & Technology, Regulatory & Compliance, Fleet Safety, Industry Deals",
-  "sources": [
-    {
-      "title": "Original article title from source",
-      "url": "https://actual-source-url.com/article",
-      "domain": "source-domain.com",
-      "snippet": "Brief description of what this source contributed"
-    }
-  ]
-}`;
+  const prompt = buildSynthesisPrompt(sourceSummaries);
 
   try {
     const response = await anthropic.messages.create({
