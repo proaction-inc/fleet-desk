@@ -35,7 +35,7 @@ function SourceLogo({
       alt={clean}
       width={size}
       height={size}
-      className={`rounded-full object-cover ${isFleetDesk ? "bg-accent" : "bg-white"} ${className}`}
+      className={`rounded-full object-cover ${isFleetDesk ? "bg-accent" : "bg-surface"} ${className}`}
       style={{ width: size, height: size }}
     />
   );
@@ -71,7 +71,7 @@ export function SourceCirclesClickable({
           {displayDomains.map((domain, i) => (
             <div
               key={domain}
-              className="rounded-full border-2 border-white overflow-hidden"
+              className="rounded-full border-2 border-background overflow-hidden"
               style={{ zIndex: 10 - i }}
             >
               <SourceLogo domain={domain} size={20} />
@@ -94,11 +94,11 @@ export function SourceCirclesClickable({
 
           {/* Modal panel */}
           <div
-            className="relative bg-white rounded-xl shadow-2xl border border-border w-full max-w-md m-4 mt-20 mr-4 max-h-[80vh] overflow-y-auto"
+            className="relative bg-background rounded-xl shadow-2xl border border-border w-full max-w-md m-4 mt-20 mr-4 max-h-[80vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="sticky top-0 bg-white border-b border-border px-5 py-4 flex items-center justify-between rounded-t-xl">
+            <div className="sticky top-0 bg-background border-b border-border px-5 py-4 flex items-center justify-between rounded-t-xl">
               <div className="flex items-center gap-2">
                 <svg
                   width="18"

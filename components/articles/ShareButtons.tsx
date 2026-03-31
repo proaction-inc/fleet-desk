@@ -55,7 +55,7 @@ export default function ShareButtons({
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-xl shadow-lg border border-border py-1 z-50">
+        <div className="absolute right-0 top-full mt-1 w-56 bg-background rounded-xl shadow-lg border border-border py-1 z-50">
           <a
             href={linkedInUrl}
             target="_blank"

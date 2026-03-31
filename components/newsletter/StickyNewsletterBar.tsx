@@ -44,7 +44,7 @@ export default function StickyNewsletterBar() {
 
   return (
     <div
-      className={`fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-border shadow-[0_-2px_8px_rgba(0,0,0,0.06)] transition-transform duration-300 ease-out ${
+      className={`fixed bottom-0 left-0 right-0 z-50 bg-background border-t border-border shadow-[0_-2px_8px_rgba(0,0,0,0.06)] transition-transform duration-300 ease-out ${
         visible ? "translate-y-0" : "translate-y-full"
       }`}
     >
@@ -60,7 +60,7 @@ export default function StickyNewsletterBar() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="your@email.com"
-            className="flex-1 min-w-0 px-3 py-1.5 rounded-md border border-border text-sm bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+            className="flex-1 min-w-0 px-3 py-1.5 rounded-md border border-border text-sm bg-surface text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
           />
           <button
             type="submit"

@@ -167,7 +167,7 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
         style={{ padding: "0 1rem" }}
       >
         <div
-          className={`pointer-events-auto w-full bg-white shadow-2xl border border-border border-b-0 flex flex-col transition-all duration-300 ease-out ${
+          className={`pointer-events-auto w-full bg-background shadow-2xl border border-border border-b-0 flex flex-col transition-all duration-300 ease-out ${
             open
               ? `rounded-t-2xl ${expanded ? "max-h-[85vh]" : "max-h-[50vh]"}`
               : "rounded-t-2xl"
@@ -252,7 +252,7 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
           )}
 
           {/* Input */}
-          <div className={`px-4 sm:px-5 py-3 bg-white shrink-0 ${open && messages.length > 0 ? "border-t border-border" : ""}`}>
+          <div className={`px-4 sm:px-5 py-3 bg-background shrink-0 ${open && messages.length > 0 ? "border-t border-border" : ""}`}>
             <form onSubmit={handleSubmit} className="relative">
               <input
                 type="text"

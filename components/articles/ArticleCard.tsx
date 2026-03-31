@@ -21,7 +21,7 @@ function SourceCircles({ count }: { count: number }) {
     <div className="flex items-center">
       <div className="flex -space-x-1.5">
         <div
-          className="rounded-full border-2 border-white overflow-hidden"
+          className="rounded-full border-2 border-background overflow-hidden"
           style={{ zIndex: 10 }}
         >
           {/* Use our own favicon for Fleet Desk */}
