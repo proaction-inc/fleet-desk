@@ -95,24 +95,49 @@ export async function extractOgImage(url: string): Promise<string | null> {
 }
 
 /**
+ * Resolve a Google News redirect URL to the actual article URL.
+ */
+async function resolveGoogleNewsUrl(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      redirect: "follow",
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; TheFleetDesk/1.0)" },
+      signal: AbortSignal.timeout(10000),
+    });
+    // The final URL after redirects is the real article
+    if (response.url && !response.url.includes("news.google.com")) {
+      return response.url;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Try to get an image from source article URLs.
- * Skips any og:image that has already been used by another article.
+ * Follows Google News redirects and skips already-used images.
  */
 export async function getImageFromSources(
   sourceUrls: string[]
 ): Promise<string | null> {
   for (const url of sourceUrls) {
-    // Skip google news redirect URLs — they often don't have og:image
-    if (url.includes("news.google.com")) continue;
+    // Resolve Google News redirects to actual article URLs
+    let resolvedUrl = url;
+    if (url.includes("news.google.com")) {
+      const resolved = await resolveGoogleNewsUrl(url);
+      if (!resolved) continue;
+      resolvedUrl = resolved;
+      console.log(`[Images] Resolved Google News → ${resolvedUrl.substring(0, 80)}`);
+    }
 
-    const ogImage = await extractOgImage(url);
+    const ogImage = await extractOgImage(resolvedUrl);
     if (ogImage && ogImage.startsWith("http")) {
-      // Check if this og:image was already used by another article
       if (usedOgImages.has(ogImage)) {
-        console.log(`[Images] Skipping duplicate og:image from ${url}`);
+        console.log(`[Images] Skipping duplicate og:image from ${resolvedUrl}`);
         continue;
       }
-      console.log(`[Images] Found unique og:image from ${url}`);
+      console.log(`[Images] Found unique og:image from ${resolvedUrl}`);
       return ogImage;
     }
   }
@@ -289,8 +314,25 @@ export function extractImageKeywords(
   return [base, ...titleWords];
 }
 
+// Rotating fallback pool — never returns the same image twice in a row
+let fallbackIndex = 0;
+const FALLBACK_POOL = [
+  "https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=1200&h=675&fit=crop",
+  "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=1200&h=675&fit=crop",
+  "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=1200&h=675&fit=crop",
+  "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&h=675&fit=crop",
+  "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=1200&h=675&fit=crop",
+  "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=1200&h=675&fit=crop",
+  "https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=1200&h=675&fit=crop",
+  "https://images.unsplash.com/photo-1580674285054-bed31e145f59?w=1200&h=675&fit=crop",
+  "https://images.unsplash.com/photo-1497436072909-60f360e1d4b1?w=1200&h=675&fit=crop",
+  "https://images.unsplash.com/photo-1519389950473-47ba0277781c?w=1200&h=675&fit=crop",
+];
+
 function getFallbackImage(): string {
-  return "https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=1200&h=675&fit=crop";
+  const url = FALLBACK_POOL[fallbackIndex % FALLBACK_POOL.length]!;
+  fallbackIndex++;
+  return url;
 }
 
 export function resetUsedPhotosCache(): void {
