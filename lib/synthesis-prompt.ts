@@ -49,6 +49,7 @@ RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, just raw JSON):
   "excerpt": "1-2 sentence summary for cards and SEO (max 200 chars)",
   "content": "<h2>First Section</h2><p>Content...</p><h2>Second Section</h2><p>Content...</p>",
   "topic": "One of: Fleet Management & Technology, Regulatory & Compliance, Fleet Safety, Industry Deals",
+  "imageKeywords": ["3-4 specific keywords for finding a relevant stock photo, e.g. semi truck highway sunset, fleet dashboard technology, warehouse logistics"],
   "sources": [
     {
       "title": "Original article title from source",

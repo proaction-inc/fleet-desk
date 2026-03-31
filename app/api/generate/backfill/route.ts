@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabase/client";
 import { buildSynthesisPrompt } from "@/lib/synthesis-prompt";
+import { findAndStoreArticleImage, extractImageKeywords } from "@/lib/article-images";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -25,6 +26,7 @@ interface GeneratedArticle {
   excerpt: string;
   content: string;
   topic: string;
+  imageKeywords?: string[];
   sources: {
     title: string;
     url: string;
@@ -228,34 +230,6 @@ async function synthesizeArticle(
   }
 }
 
-// ─── Image selection ──────────────────────────────────────────────────────────
-
-function getTopicImage(topic: string): string {
-  const topicImages: Record<string, string[]> = {
-    "Fleet Management & Technology": [
-      "https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=1200&h=675&fit=crop",
-      "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&h=675&fit=crop",
-      "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=1200&h=675&fit=crop",
-    ],
-    "Regulatory & Compliance": [
-      "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=1200&h=675&fit=crop",
-      "https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=1200&h=675&fit=crop",
-    ],
-    "Fleet Safety": [
-      "https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=1200&h=675&fit=crop",
-      "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=1200&h=675&fit=crop",
-    ],
-    "Industry Deals": [
-      "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=1200&h=675&fit=crop",
-      "https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=1200&h=675&fit=crop",
-    ],
-  };
-
-  const images =
-    topicImages[topic] ?? topicImages["Fleet Management & Technology"]!;
-  return images[Math.floor(Math.random() * images.length)]!;
-}
-
 // ─── Publish ──────────────────────────────────────────────────────────────────
 
 async function publishArticle(
@@ -274,7 +248,11 @@ async function publishArticle(
     return null;
   }
 
-  const imageUrl = getTopicImage(article.topic);
+  // Find and store a unique, relevant image
+  const keywords = article.imageKeywords?.length
+    ? article.imageKeywords
+    : extractImageKeywords(article.title, article.topic);
+  const imageUrl = await findAndStoreArticleImage(article.slug, keywords);
 
   const { data: inserted, error } = await supabaseAdmin
     .from("articles")
