@@ -19,6 +19,10 @@ function formatMessage(text: string): string {
   // Bold
   let html = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 
+  // Headers: ## Header → <h4>
+  html = html.replace(/^###\s+(.+)$/gm, '<h4 class="font-bold text-sm mt-3 mb-1">$1</h4>');
+  html = html.replace(/^##\s+(.+)$/gm, '<h4 class="font-bold text-sm mt-3 mb-1">$1</h4>');
+
   // Process lines
   const lines = html.split("\n");
   const result: string[] = [];
@@ -26,6 +30,13 @@ function formatMessage(text: string): string {
 
   for (const line of lines) {
     const trimmed = line.trim();
+    // Skip if it's already an HTML tag (like our h4)
+    if (trimmed.startsWith("<h4") || trimmed.startsWith("<h3")) {
+      if (inList) { result.push("</ul>"); inList = false; }
+      result.push(trimmed);
+      continue;
+    }
+
     const isBullet = /^[-•*]\s/.test(trimmed);
 
     if (isBullet) {
@@ -68,12 +79,7 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Auto-expand when first message is sent
-  useEffect(() => {
-    if (messages.length > 0 && !expanded) {
-      setExpanded(true);
-    }
-  }, [messages.length, expanded]);
+  // No auto-expand — user controls it via the button
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -166,7 +172,7 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
   return (
     <div
       className={`fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-border shadow-lg transition-all duration-300 ${
-        expanded ? "top-24" : ""
+        expanded ? "top-[33vh]" : ""
       }`}
     >
       {/* Header bar with expand/collapse */}
@@ -212,7 +218,7 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
       {messages.length > 0 && (
         <div
           className={`max-w-2xl mx-auto px-4 sm:px-6 overflow-y-auto py-4 space-y-4 ${
-            expanded ? "flex-1 h-[calc(100%-7rem)]" : "max-h-72"
+            expanded ? "h-[calc(67vh-7rem)]" : "max-h-64"
           }`}
         >
           {messages.map((msg, i) => (
