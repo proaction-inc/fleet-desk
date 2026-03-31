@@ -3,8 +3,10 @@ import { supabaseAdmin } from "./supabase/client";
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY!;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
-// Track used photo URLs across a generation run to prevent duplicates
+// Track used Unsplash photo URLs to prevent duplicates
 const usedPhotoIds = new Set<string>();
+// Track used og:image URLs so the same source image isn't reused across articles
+const usedOgImages = new Set<string>();
 
 async function loadUsedPhotos(): Promise<void> {
   if (usedPhotoIds.size > 0) return;
@@ -19,6 +21,24 @@ async function loadUsedPhotos(): Promise<void> {
       if (row.featured_image_url) {
         usedPhotoIds.add(row.featured_image_url);
       }
+    }
+  }
+
+  // Load existing og:image mappings from storage to detect reuse
+  const { data: objects } = await supabaseAdmin.storage
+    .from("article-images")
+    .list("articles", { limit: 500 });
+
+  if (objects) {
+    // Track file sizes as a proxy for duplicate detection — same file size = same image
+    const sizeSeen = new Map<number, string>();
+    for (const obj of objects) {
+      const size = (obj.metadata as Record<string, unknown>)?.size as number;
+      if (size && sizeSeen.has(size)) {
+        // This file is likely a duplicate of another
+        usedOgImages.add(obj.name);
+      }
+      if (size) sizeSeen.set(size, obj.name);
     }
   }
 }
@@ -76,7 +96,7 @@ export async function extractOgImage(url: string): Promise<string | null> {
 
 /**
  * Try to get an image from source article URLs.
- * Returns the first successful og:image found.
+ * Skips any og:image that has already been used by another article.
  */
 export async function getImageFromSources(
   sourceUrls: string[]
@@ -87,7 +107,12 @@ export async function getImageFromSources(
 
     const ogImage = await extractOgImage(url);
     if (ogImage && ogImage.startsWith("http")) {
-      console.log(`[Images] Found og:image from ${url}`);
+      // Check if this og:image was already used by another article
+      if (usedOgImages.has(ogImage)) {
+        console.log(`[Images] Skipping duplicate og:image from ${url}`);
+        continue;
+      }
+      console.log(`[Images] Found unique og:image from ${url}`);
       return ogImage;
     }
   }
@@ -153,6 +178,7 @@ export async function findAndStoreArticleImage(
     // 5. Return the permanent public URL and track it
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/article-images/${storagePath}`;
     usedPhotoIds.add(imageUrl);
+    usedOgImages.add(imageUrl); // Prevent this og:image from being reused
     console.log(`[Images] Stored image for "${slug}"`);
     return publicUrl;
   } catch (error) {
@@ -269,4 +295,5 @@ function getFallbackImage(): string {
 
 export function resetUsedPhotosCache(): void {
   usedPhotoIds.clear();
+  usedOgImages.clear();
 }
