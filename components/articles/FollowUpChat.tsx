@@ -9,7 +9,6 @@ interface ChatMessage {
 
 function formatMessage(text: string): string {
   if (!text) return "";
-
   let html = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/^###\s+(.+)$/gm, '<h4 class="font-bold text-sm mt-3 mb-1">$1</h4>');
   html = html.replace(/^##\s+(.+)$/gm, '<h4 class="font-bold text-sm mt-3 mb-1">$1</h4>');
@@ -27,18 +26,12 @@ function formatMessage(text: string): string {
     }
     const isBullet = /^[-•*]\s/.test(trimmed);
     if (isBullet) {
-      if (!inList) {
-        result.push('<ul class="list-disc pl-5 my-2 space-y-1">');
-        inList = true;
-      }
+      if (!inList) { result.push('<ul class="list-disc pl-5 my-2 space-y-1">'); inList = true; }
       result.push(`<li>${trimmed.replace(/^[-•*]\s/, "")}</li>`);
     } else {
       if (inList) { result.push("</ul>"); inList = false; }
-      if (trimmed === "") {
-        result.push("<br/>");
-      } else {
-        result.push(`<p class="mb-2">${trimmed}</p>`);
-      }
+      if (trimmed === "") result.push("<br/>");
+      else result.push(`<p class="mb-2">${trimmed}</p>`);
     }
   }
   if (inList) result.push("</ul>");
@@ -50,22 +43,50 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
   const sessionIdRef = useRef<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    sessionIdRef.current = crypto.randomUUID();
-  }, []);
+  useEffect(() => { sessionIdRef.current = crypto.randomUUID(); }, []);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
+  // Lock body scroll when modal is open (fixes mobile scroll-through)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (open) {
+      document.body.style.overflow = "hidden";
+      document.body.style.position = "fixed";
+      document.body.style.width = "100%";
+      document.body.style.top = `-${window.scrollY}px`;
+    } else {
+      const scrollY = document.body.style.top;
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.width = "";
+      document.body.style.top = "";
+      window.scrollTo(0, parseInt(scrollY || "0") * -1);
+    }
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.width = "";
+      document.body.style.top = "";
+    };
+  }, [open]);
+
+  function closeModal() {
+    if (!isStreaming) {
+      setOpen(false);
+      setExpanded(false);
+    }
+  }
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       const trimmed = input.trim();
       if (!trimmed || isStreaming) return;
+
+      if (!open) setOpen(true);
 
       setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
       setInput("");
@@ -76,21 +97,14 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            articleId,
-            sessionId: sessionIdRef.current,
-            message: trimmed,
-          }),
+          body: JSON.stringify({ articleId, sessionId: sessionIdRef.current, message: trimmed }),
         });
 
         if (!res.ok || !res.body) {
           setMessages((prev) => {
-            const updated = [...prev];
-            updated[updated.length - 1] = {
-              role: "assistant",
-              content: "Sorry, something went wrong. Please try again.",
-            };
-            return updated;
+            const u = [...prev];
+            u[u.length - 1] = { role: "assistant", content: "Sorry, something went wrong. Please try again." };
+            return u;
           });
           setIsStreaming(false);
           return;
@@ -106,7 +120,6 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
-
           for (const line of lines) {
             const t = line.trim();
             if (!t.startsWith("data: ")) continue;
@@ -116,13 +129,10 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
               const parsed = JSON.parse(data);
               if (parsed.text) {
                 setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  updated[updated.length - 1] = {
-                    ...last,
-                    content: last.content + parsed.text,
-                  };
-                  return updated;
+                  const u = [...prev];
+                  const last = u[u.length - 1];
+                  u[u.length - 1] = { ...last, content: last.content + parsed.text };
+                  return u;
                 });
               }
             } catch {}
@@ -130,81 +140,84 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
         }
       } catch {
         setMessages((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1] = {
-            role: "assistant",
-            content: "Sorry, something went wrong. Please try again.",
-          };
-          return updated;
+          const u = [...prev];
+          u[u.length - 1] = { role: "assistant", content: "Sorry, something went wrong. Please try again." };
+          return u;
         });
       } finally {
         setIsStreaming(false);
       }
     },
-    [input, isStreaming, articleId]
+    [input, isStreaming, articleId, open]
   );
-
-  const hasMessages = messages.length > 0;
 
   return (
     <>
-      {/* Backdrop when modal is showing messages */}
-      {hasMessages && (
+      {/* Backdrop — click to close */}
+      {open && (
         <div
-          className="fixed inset-0 z-40 bg-black/20 transition-opacity"
-          onClick={() => {/* don't close on backdrop click while chatting */}}
+          className="fixed inset-0 z-40 bg-black/30 transition-opacity"
+          onClick={closeModal}
         />
       )}
 
-      {/* Chat modal — slides up from bottom like iOS sheet */}
+      {/* Modal card */}
       <div
-        className={`fixed z-50 left-1/2 -translate-x-1/2 bottom-0 w-full transition-all duration-300 ease-out ${
-          hasMessages
-            ? "max-w-2xl"
-            : "max-w-2xl"
-        }`}
-        style={{
-          maxWidth: "min(672px, calc(100% - 2rem))",
-        }}
+        className="fixed z-50 bottom-0 left-0 right-0 flex justify-center pointer-events-none"
+        style={{ padding: "0 1rem" }}
       >
         <div
-          className={`bg-white rounded-t-2xl shadow-2xl border border-border border-b-0 flex flex-col transition-all duration-300 ${
-            hasMessages
-              ? expanded
-                ? "max-h-[80vh]"
-                : "max-h-[50vh]"
-              : ""
+          className={`pointer-events-auto w-full bg-white shadow-2xl border border-border border-b-0 flex flex-col transition-all duration-300 ease-out ${
+            open
+              ? `rounded-t-2xl ${expanded ? "max-h-[85vh]" : "max-h-[50vh]"}`
+              : "rounded-t-2xl"
           }`}
+          style={{ maxWidth: 672 }}
+          onClick={(e) => e.stopPropagation()}
         >
-          {/* Handle bar + expand controls */}
-          {hasMessages && (
-            <div className="flex items-center justify-between px-5 pt-3 pb-2">
-              {/* Drag handle */}
-              <div className="flex-1 flex justify-center">
-                <div className="w-10 h-1 rounded-full bg-border" />
-              </div>
+          {/* Header: expand (left), handle, close (right) */}
+          {open && messages.length > 0 && (
+            <div className="flex items-center px-4 pt-3 pb-2 shrink-0">
+              {/* Expand button — left side */}
               <button
                 type="button"
                 onClick={() => setExpanded(!expanded)}
-                className="absolute right-4 p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-surface transition-colors"
+                className="p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-surface transition-colors"
                 aria-label={expanded ? "Shrink" : "Expand"}
               >
-                {expanded ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M17 7l-10 10M7 7l10 10" />
-                  </svg>
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M7 14l5-5 5 5" />
-                  </svg>
-                )}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  {expanded ? (
+                    <path d="M17 14l-5 5-5-5" />
+                  ) : (
+                    <path d="M7 10l5-5 5 5" />
+                  )}
+                </svg>
+              </button>
+
+              {/* Center handle */}
+              <div className="flex-1 flex justify-center">
+                <div className="w-10 h-1 rounded-full bg-border" />
+              </div>
+
+              {/* Close button — right side */}
+              <button
+                type="button"
+                onClick={closeModal}
+                className="p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-surface transition-colors"
+                aria-label="Close chat"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
               </button>
             </div>
           )}
 
-          {/* Messages area */}
-          {hasMessages && (
-            <div className="flex-1 overflow-y-auto px-5 pb-2 space-y-3">
+          {/* Messages */}
+          {open && messages.length > 0 && (
+            <div
+              className="flex-1 overflow-y-auto px-4 sm:px-5 pb-2 space-y-3 overscroll-contain"
+            >
               {messages.map((msg, i) => (
                 <div
                   key={i}
@@ -221,13 +234,9 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
                       msg.role === "assistant" ? (
                         <div
                           className="[&_strong]:font-bold [&_ul]:my-2 [&_ul]:space-y-1 [&_li]:text-sm [&_p]:mb-2 [&_p:last-child]:mb-0"
-                          dangerouslySetInnerHTML={{
-                            __html: formatMessage(msg.content),
-                          }}
+                          dangerouslySetInnerHTML={{ __html: formatMessage(msg.content) }}
                         />
-                      ) : (
-                        msg.content
-                      )
+                      ) : msg.content
                     ) : (
                       <span className="inline-flex items-center gap-1 text-muted">
                         <span className="w-1.5 h-1.5 bg-muted rounded-full animate-pulse" />
@@ -242,8 +251,8 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
             </div>
           )}
 
-          {/* Input area */}
-          <div className="px-5 py-3 border-t border-border bg-white rounded-b-none">
+          {/* Input */}
+          <div className={`px-4 sm:px-5 py-3 bg-white shrink-0 ${open && messages.length > 0 ? "border-t border-border" : ""}`}>
             <form onSubmit={handleSubmit} className="relative">
               <input
                 type="text"

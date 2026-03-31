@@ -43,7 +43,7 @@ export default function Navbar() {
               </span>
             ))}
             <Link
-              href="#newsletter"
+              href="/about#newsletter"
               className="ml-4 px-4 py-1.5 text-sm font-semibold rounded-full bg-accent text-white hover:bg-accent-light transition-colors"
             >
               Subscribe
@@ -85,7 +85,7 @@ export default function Navbar() {
             ))}
             <div className="pt-3 border-t border-border mt-3">
               <Link
-                href="#newsletter"
+                href="/about#newsletter"
                 onClick={() => setMobileOpen(false)}
                 className="block text-center px-4 py-2.5 text-sm font-semibold rounded-full bg-accent text-white hover:bg-accent-light transition-colors"
               >
