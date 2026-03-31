@@ -253,10 +253,12 @@ async function synthesizeArticle(
 
 async function publishArticle(article: GeneratedArticle): Promise<string | null> {
   // Find and store a unique, relevant image for this article
+  // Priority: og:image from sources > Unsplash search > fallback
   const keywords = article.imageKeywords?.length
     ? article.imageKeywords
     : extractImageKeywords(article.title, article.topic);
-  const imageUrl = await findAndStoreArticleImage(article.slug, keywords);
+  const sourceUrls = article.sources.map((s) => s.url);
+  const imageUrl = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
 
   // Insert the article
   const { data: inserted, error } = await supabaseAdmin
