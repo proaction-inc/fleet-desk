@@ -252,7 +252,8 @@ async function publishArticle(
   const keywords = article.imageKeywords?.length
     ? article.imageKeywords
     : extractImageKeywords(article.title, article.topic);
-  const imageUrl = await findAndStoreArticleImage(article.slug, keywords);
+  const sourceUrls = article.sources.map((s) => s.url);
+  const imageUrl = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
 
   const { data: inserted, error } = await supabaseAdmin
     .from("articles")
