@@ -7,10 +7,55 @@ interface ChatMessage {
   content: string;
 }
 
+/**
+ * Simple markdown-to-HTML for chat messages:
+ * - **bold** → <strong>
+ * - Bullet lines (- or •) → <li> inside <ul>
+ * - Newlines → <br> or paragraph breaks
+ */
+function formatMessage(text: string): string {
+  if (!text) return "";
+
+  // Bold
+  let html = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+
+  // Process lines
+  const lines = html.split("\n");
+  const result: string[] = [];
+  let inList = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const isBullet = /^[-•*]\s/.test(trimmed);
+
+    if (isBullet) {
+      if (!inList) {
+        result.push('<ul class="list-disc pl-5 my-2 space-y-1">');
+        inList = true;
+      }
+      result.push(`<li>${trimmed.replace(/^[-•*]\s/, "")}</li>`);
+    } else {
+      if (inList) {
+        result.push("</ul>");
+        inList = false;
+      }
+      if (trimmed === "") {
+        result.push("<br/>");
+      } else {
+        result.push(`<p class="mb-2">${trimmed}</p>`);
+      }
+    }
+  }
+  if (inList) result.push("</ul>");
+
+  return result.join("");
+}
+
 export default function FollowUpChat({ articleId }: { articleId: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const sessionIdRef = useRef<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -23,6 +68,13 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Auto-expand when first message is sent
+  useEffect(() => {
+    if (messages.length > 0 && !expanded) {
+      setExpanded(true);
+    }
+  }, [messages.length, expanded]);
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -34,7 +86,6 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
       setInput("");
       setIsStreaming(true);
 
-      // Add placeholder assistant message
       setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
       try {
@@ -70,14 +121,13 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
 
-          // Parse SSE lines from buffer
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
           for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data: ")) continue;
-            const data = trimmed.slice(6);
+            const trimmedLine = line.trim();
+            if (!trimmedLine.startsWith("data: ")) continue;
+            const data = trimmedLine.slice(6);
             if (data === "[DONE]") continue;
             try {
               const parsed = JSON.parse(data);
@@ -114,23 +164,81 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
   );
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-border">
+    <div
+      className={`fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-border shadow-lg transition-all duration-300 ${
+        expanded ? "top-24" : ""
+      }`}
+    >
+      {/* Header bar with expand/collapse */}
+      {messages.length > 0 && (
+        <div className="flex items-center justify-between px-4 sm:px-6 py-2 border-b border-border bg-surface max-w-2xl mx-auto">
+          <span className="text-xs font-medium text-muted">
+            {messages.filter((m) => m.role === "user").length} questions asked
+          </span>
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-white transition-colors"
+            aria-label={expanded ? "Collapse chat" : "Expand chat"}
+          >
+            {expanded ? (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M7 14l5-5 5 5" />
+              </svg>
+            ) : (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M7 10l5 5 5-5" />
+              </svg>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* Chat messages area */}
       {messages.length > 0 && (
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 max-h-72 overflow-y-auto py-4 space-y-3">
+        <div
+          className={`max-w-2xl mx-auto px-4 sm:px-6 overflow-y-auto py-4 space-y-4 ${
+            expanded ? "flex-1 h-[calc(100%-7rem)]" : "max-h-72"
+          }`}
+        >
           {messages.map((msg, i) => (
             <div
               key={i}
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   msg.role === "user"
-                    ? "bg-accent text-white"
-                    : "bg-surface text-foreground"
+                    ? "bg-accent text-white max-w-[80%]"
+                    : "bg-surface text-foreground max-w-[90%]"
                 }`}
               >
-                {msg.content || (
+                {msg.content ? (
+                  msg.role === "assistant" ? (
+                    <div
+                      className="prose-chat [&_strong]:font-bold [&_ul]:my-2 [&_ul]:space-y-1 [&_li]:text-sm [&_p]:mb-2 [&_p:last-child]:mb-0"
+                      dangerouslySetInnerHTML={{
+                        __html: formatMessage(msg.content),
+                      }}
+                    />
+                  ) : (
+                    msg.content
+                  )
+                ) : (
                   <span className="inline-flex items-center gap-1 text-muted">
                     <span className="w-1.5 h-1.5 bg-muted rounded-full animate-pulse" />
                     <span
@@ -151,7 +259,7 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
       )}
 
       {/* Input area */}
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3 bg-white">
         <form onSubmit={handleSubmit} className="relative">
           <input
             ref={inputRef}
