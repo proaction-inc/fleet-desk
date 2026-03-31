@@ -88,7 +88,7 @@ export default function NewsletterSignup({ variant = "inline" }: { variant?: "in
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="your@email.com"
-            className="flex-1 px-3 py-2 rounded-md border border-border text-sm bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+            className="flex-1 px-3 py-2 rounded-md border border-border text-base bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
           />
           <button
             type="submit"

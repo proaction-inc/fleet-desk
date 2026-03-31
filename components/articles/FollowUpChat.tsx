@@ -260,7 +260,7 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Ask a follow-up about this article..."
                 disabled={isStreaming}
-                className="w-full h-11 pl-4 pr-12 rounded-full border border-border bg-surface text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:opacity-60 transition-colors"
+                className="w-full h-11 pl-4 pr-12 rounded-full border border-border bg-surface text-base text-foreground placeholder:text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:opacity-60 transition-colors"
               />
               <button
                 type="submit"
