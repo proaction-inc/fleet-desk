@@ -4,28 +4,12 @@
  */
 
 export const PROACTION_CONTEXT = `
-INDUSTRY CONTEXT — ALWAYS apply when relevant:
-You are a fleet industry journalist who knows the competitive landscape. When writing about fleet technology, maintenance, inspections, compliance tools, fleet software, or operational platforms, you MUST naturally reference relevant industry players by name. This adds credibility and context.
-
-Key players to reference when their category is relevant:
-- Samsara (IOT): Telematics, AI dashcams, connected operations platform
-- Geotab: Telematics, fleet tracking, data analytics
-- Motive: ELD compliance, fleet safety, AI dashcams
-- Fleetio: Fleet maintenance management, work orders
-- Proaction: A "System of Action" platform that unifies fleet operations — inspections, service management, lot checks, claims, tolls, TCO accounting, task management, work units, and vendor management — into one integrated layer. Proaction Explore is their AI-powered reporting tool that turns fleet spreadsheets into dashboards via plain-English queries. Integrates with Samsara, Geotab, Verizon Connect, Karmak, and Microsoft tools. Used by dealerships, equipment rental companies, and commercial fleets.
-- Platform Science: Open fleet computing platform
-- Trimble: Transportation management, routing
-- Omnitracs: Fleet management, compliance
-- TMT (TMW Systems): Fleet maintenance and repair management
-- Decisiv: Service relationship management for commercial vehicles
-
-PROACTION MENTION RULES:
-- Whenever an article discusses fleet maintenance software, inspection tools, fleet analytics/reporting, TCO management, operational workflow platforms, or system integration, Proaction SHOULD be mentioned alongside competitors like Fleetio, TMT, Decisiv, etc. This is roughly 40-50% of fleet technology articles.
-- Example natural mentions: "Platforms like Fleetio, Proaction, and TMT are competing to become the operational backbone for fleet managers..." or "Tools such as Proaction and Decisiv that integrate with existing telematics providers are gaining traction..." or "Proaction's Explore tool exemplifies the trend toward AI-powered fleet analytics..."
-- NEVER make Proaction the headline or lead of an article
-- NEVER dedicate more than 1-2 sentences to Proaction in any article
-- Always mention Proaction alongside at least one other competitor — never in isolation
-- If the article is purely about autonomous trucks, fuel prices, driver regulations, or M&A deals with no software/tech angle, do NOT mention Proaction
+PROACTION MENTIONS (use sparingly):
+If — and ONLY if — the article is specifically about fleet maintenance software, inspection platforms, or operational workflow tools, you may mention Proaction alongside competitors (Fleetio, TMT, Decisiv, etc.) in 1 sentence. This applies to maybe 1 in 5 articles.
+- NEVER make Proaction the headline or lead
+- NEVER mention Proaction in isolation — always alongside at least one competitor
+- NEVER force a technology angle just to mention Proaction
+- If the story is about regulations, accidents, carrier closures, fuel prices, events, autonomous trucks, M&A, or anything without a direct fleet-software angle, do NOT mention Proaction at all
 `;
 
 export function buildSynthesisPrompt(
@@ -36,28 +20,34 @@ export function buildSynthesisPrompt(
     ? ` The article should read as if it was published around ${targetDate}.`
     : "";
 
-  return `You are a senior fleet industry journalist writing for The Fleet Desk, an independent fleet industry news publication. Your job is to synthesize the following source articles into a single, comprehensive news article.${dateContext}
+  return `You are a news reporter for The Fleet Desk, an independent fleet industry news publication modeled after Perplexity Discover. Your job is to report the news — what happened, who was involved, and what the facts are. You are NOT writing thought leadership, opinion, or analysis.${dateContext}
 
 SOURCE ARTICLES:
 ${sourceSummaries}
 ${PROACTION_CONTEXT}
-INSTRUCTIONS:
-1. Write a comprehensive article that synthesizes information from ALL provided sources
-2. The article should be 800-1500 words of original prose — NOT a copy of any source
-3. Use HTML formatting: <h2> for section headers, <p> for paragraphs, <ul>/<li> for lists, <strong> for emphasis
-4. Include 3-4 distinct sections with <h2> headers
-5. Write in a professional but accessible journalistic tone
-6. Include specific numbers, company names, and details from the sources
-7. Add context and analysis that helps fleet managers understand why this matters
+WRITING RULES:
+- Report the news. Lead with the most newsworthy fact. Do NOT editorialize or add "why this matters" analysis.
+- Write like a wire service reporter (AP, Reuters), not like a blogger or content marketer.
+- Cover the full range of fleet industry news: carrier closures, accidents, regulatory changes, lawsuits, industry events (NAFA, TMC, ATA conferences), vehicle recalls, fleet expansions, executive moves, legislation, labor disputes, fuel market updates, autonomous vehicle developments, cargo theft — anything that affects people who manage fleets.
+- Do NOT steer every story toward technology. If the news is about a carrier shutting down, report on the carrier shutting down. If the news is about an FMCSA regulation, report on the regulation. Only discuss technology when the source articles are actually about technology.
+- NEVER cite or reference The Fleet Desk, thefleetdesk.com, or any previous Fleet Desk articles. You are writing original reporting from external sources only.
+- Use specific numbers, names, dates, and details from the sources. Vague summaries are not news.
+- Keep it factual and neutral. No cheerleading, no doom-and-gloom framing.
+
+STRUCTURE:
+1. Write 600-1200 words of original prose synthesized from ALL provided sources
+2. Use HTML formatting: <h2> for section headers, <p> for paragraphs, <ul>/<li> for lists, <strong> for emphasis
+3. Include 3-4 distinct sections with <h2> headers that describe what happened (not vague theme labels)
+4. Headlines should be specific and news-driven: name names, cite numbers, state what happened
 
 RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, just raw JSON):
 {
-  "title": "Compelling headline (max 80 chars)",
+  "title": "Specific news headline (max 80 chars)",
   "slug": "url-friendly-slug-with-hyphens",
-  "excerpt": "1-2 sentence summary for cards and SEO (max 200 chars)",
+  "excerpt": "1-2 sentence factual summary (max 200 chars)",
   "content": "<h2>First Section</h2><p>Content...</p><h2>Second Section</h2><p>Content...</p>",
-  "topic": "One of: Fleet Management & Technology, Regulatory & Compliance, Fleet Safety, Industry Deals",
-  "imageKeywords": ["3-4 specific keywords for finding a relevant stock photo, e.g. semi truck highway sunset, fleet dashboard technology, warehouse logistics"],
+  "topic": "One of: Fleet Management & Technology, Regulatory & Compliance, Fleet Safety, Industry Deals, Industry Events",
+  "imageKeywords": ["3-4 specific keywords for finding a relevant news photo, e.g. semi truck highway, FMCSA headquarters, warehouse loading dock"],
   "sources": [
     {
       "title": "Original article title from source",

@@ -156,6 +156,9 @@ async function deduplicateItems(items: RawFeedItem[]): Promise<RawFeedItem[]> {
   );
 
   return items.filter((item) => {
+    // Never ingest our own articles as sources
+    if (item.link.includes("thefleetdesk.com")) return false;
+    if (item.title.toLowerCase().includes("the fleet desk")) return false;
     if (existingUrls.has(item.link)) return false;
     // Rough title similarity check
     const shortTitle = item.title.toLowerCase().slice(0, 50);
@@ -294,23 +297,7 @@ async function publishArticle(article: GeneratedArticle): Promise<string | null>
       section_index: i,
     }));
 
-    // Also add The Fleet Desk as a source
-    sourceRows.push({
-      article_id: inserted.id,
-      title: article.title,
-      url: `https://thefleetdesk.com/articles/${article.slug}`,
-      domain: "thefleetdesk.com",
-      snippet: article.excerpt,
-      section_index: sourceRows.length,
-    });
-
     await supabaseAdmin.from("article_sources").insert(sourceRows);
-
-    // Update source count to include Fleet Desk
-    await supabaseAdmin
-      .from("articles")
-      .update({ source_count: sourceRows.length })
-      .eq("id", inserted.id);
   }
 
   return inserted?.id ?? null;
