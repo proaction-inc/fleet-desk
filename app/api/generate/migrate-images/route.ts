@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
         `[Migrate] ${article.slug} → ${sourceUrls.length} source URLs, keywords: ${keywords.slice(0, 2).join(", ")}`
       );
 
-      const newUrl = await findAndStoreArticleImage(
+      const { publicUrl: newUrl, sourceImageUrl } = await findAndStoreArticleImage(
         article.slug,
         keywords,
         sourceUrls
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
       if (newUrl && newUrl.includes("supabase.co/storage")) {
         await supabaseAdmin
           .from("articles")
-          .update({ featured_image_url: newUrl })
+          .update({ featured_image_url: newUrl, source_image_url: sourceImageUrl })
           .eq("id", article.id);
 
         results.push({ slug: article.slug, status: "migrated" });

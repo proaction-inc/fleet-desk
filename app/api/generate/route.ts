@@ -261,7 +261,7 @@ async function publishArticle(article: GeneratedArticle): Promise<string | null>
     ? article.imageKeywords
     : extractImageKeywords(article.title, article.topic);
   const sourceUrls = article.sources.map((s) => s.url);
-  const imageUrl = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
+  const { publicUrl, sourceImageUrl } = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
 
   // Insert the article
   const { data: inserted, error } = await supabaseAdmin
@@ -275,7 +275,8 @@ async function publishArticle(article: GeneratedArticle): Promise<string | null>
       author: "The Fleet Desk",
       published: true,
       published_at: new Date().toISOString(),
-      featured_image_url: imageUrl,
+      featured_image_url: publicUrl,
+      source_image_url: sourceImageUrl,
       source_count: article.sources.length,
     })
     .select("id")

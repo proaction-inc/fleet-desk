@@ -3,44 +3,31 @@ import { supabaseAdmin } from "./supabase/client";
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY!;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
-// Track used Unsplash photo URLs to prevent duplicates
-const usedPhotoIds = new Set<string>();
-// Track used og:image URLs so the same source image isn't reused across articles
-const usedOgImages = new Set<string>();
+// Track used source image URLs to prevent the same photo appearing on multiple articles
+const usedSourceImages = new Set<string>();
+let cacheLoaded = false;
 
 async function loadUsedPhotos(): Promise<void> {
-  if (usedPhotoIds.size > 0) return;
+  if (cacheLoaded) return;
 
+  // Load all source_image_url values from existing articles — this is the
+  // authoritative record of which original images have already been used
   const { data } = await supabaseAdmin
     .from("articles")
-    .select("featured_image_url")
-    .eq("published", true);
+    .select("source_image_url")
+    .eq("published", true)
+    .not("source_image_url", "is", null);
 
   if (data) {
     for (const row of data) {
-      if (row.featured_image_url) {
-        usedPhotoIds.add(row.featured_image_url);
+      if (row.source_image_url) {
+        usedSourceImages.add(row.source_image_url);
       }
     }
   }
 
-  // Load existing og:image mappings from storage to detect reuse
-  const { data: objects } = await supabaseAdmin.storage
-    .from("article-images")
-    .list("articles", { limit: 500 });
-
-  if (objects) {
-    // Track file sizes as a proxy for duplicate detection — same file size = same image
-    const sizeSeen = new Map<number, string>();
-    for (const obj of objects) {
-      const size = (obj.metadata as Record<string, unknown>)?.size as number;
-      if (size && sizeSeen.has(size)) {
-        // This file is likely a duplicate of another
-        usedOgImages.add(obj.name);
-      }
-      if (size) sizeSeen.set(size, obj.name);
-    }
-  }
+  console.log(`[Images] Loaded ${usedSourceImages.size} previously-used source images`);
+  cacheLoaded = true;
 }
 
 // ─── OG Image Extraction ──────────────────────────────────────────────────────
@@ -133,7 +120,9 @@ export async function getImageFromSources(
 
     const ogImage = await extractOgImage(resolvedUrl);
     if (ogImage && ogImage.startsWith("http")) {
-      if (usedOgImages.has(ogImage)) {
+      // Normalize URL for comparison (strip query params/resize directives)
+      const normalizedOg = ogImage.split("?")[0]!;
+      if (usedSourceImages.has(normalizedOg)) {
         console.log(`[Images] Skipping duplicate og:image from ${resolvedUrl}`);
         continue;
       }
@@ -151,12 +140,15 @@ export async function getImageFromSources(
  * 1. Extract og:image from source URLs (most relevant)
  * 2. Search Unsplash with keywords (fallback)
  * 3. Hardcoded fallback image (last resort)
+ *
+ * Returns { publicUrl, sourceImageUrl } so the caller can persist
+ * sourceImageUrl to the articles table for cross-run dedup.
  */
 export async function findAndStoreArticleImage(
   slug: string,
   searchKeywords: string[],
   sourceUrls?: string[]
-): Promise<string> {
+): Promise<{ publicUrl: string; sourceImageUrl: string | null }> {
   try {
     await loadUsedPhotos();
 
@@ -175,7 +167,7 @@ export async function findAndStoreArticleImage(
 
     if (!imageUrl) {
       console.log(`[Images] No image found for "${slug}", using fallback`);
-      return getFallbackImage();
+      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
     }
 
     // 3. Download the image
@@ -183,7 +175,7 @@ export async function findAndStoreArticleImage(
 
     if (!imageBuffer) {
       console.log(`[Images] Failed to download image, using fallback`);
-      return getFallbackImage();
+      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
     }
 
     // 4. Upload to Supabase Storage
@@ -197,18 +189,19 @@ export async function findAndStoreArticleImage(
 
     if (error) {
       console.error(`[Images] Upload error:`, error);
-      return getFallbackImage();
+      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
     }
 
-    // 5. Return the permanent public URL and track it
+    // 5. Track the source URL (normalized) so it won't be reused
+    const normalizedSource = imageUrl.split("?")[0]!;
+    usedSourceImages.add(normalizedSource);
+
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/article-images/${storagePath}`;
-    usedPhotoIds.add(imageUrl);
-    usedOgImages.add(imageUrl); // Prevent this og:image from being reused
     console.log(`[Images] Stored image for "${slug}"`);
-    return publicUrl;
+    return { publicUrl, sourceImageUrl: normalizedSource };
   } catch (error) {
     console.error(`[Images] Error:`, error);
-    return getFallbackImage();
+    return { publicUrl: getFallbackImage(), sourceImageUrl: null };
   }
 }
 
@@ -250,7 +243,7 @@ async function searchUnsplashUnique(query: string): Promise<string | null> {
 
     for (const photo of data.results) {
       const url = photo.urls?.regular;
-      if (url && !usedPhotoIds.has(url)) {
+      if (url && !usedSourceImages.has(url.split("?")[0]!)) {
         return url;
       }
     }
@@ -336,6 +329,6 @@ function getFallbackImage(): string {
 }
 
 export function resetUsedPhotosCache(): void {
-  usedPhotoIds.clear();
-  usedOgImages.clear();
+  usedSourceImages.clear();
+  cacheLoaded = false;
 }

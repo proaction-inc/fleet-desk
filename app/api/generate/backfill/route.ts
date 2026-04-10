@@ -253,7 +253,7 @@ async function publishArticle(
     ? article.imageKeywords
     : extractImageKeywords(article.title, article.topic);
   const sourceUrls = article.sources.map((s) => s.url);
-  const imageUrl = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
+  const { publicUrl, sourceImageUrl } = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
 
   const { data: inserted, error } = await supabaseAdmin
     .from("articles")
@@ -266,8 +266,9 @@ async function publishArticle(
       author: "The Fleet Desk",
       published: true,
       published_at: publishDate,
-      featured_image_url: imageUrl,
-      source_count: article.sources.length + 1, // +1 for Fleet Desk
+      featured_image_url: publicUrl,
+      source_image_url: sourceImageUrl,
+      source_count: article.sources.length,
       created_at: publishDate,
       updated_at: publishDate,
     })
