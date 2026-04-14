@@ -46,6 +46,11 @@ const SEARCH_QUERIES = [
   "ELD compliance fleet",
   "autonomous trucking freight",
   "fleet maintenance costs",
+  "corporate fleet management vehicles",
+  "NAFA fleet association",
+  "fleet electrification EV commercial",
+  "automotive fleet management",
+  "municipal fleet vehicles",
 ];
 
 function cleanHtml(text: string): string {

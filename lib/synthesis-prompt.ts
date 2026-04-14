@@ -28,7 +28,8 @@ ${PROACTION_CONTEXT}
 WRITING RULES:
 - Report the news. Lead with the most newsworthy fact. Do NOT editorialize or add "why this matters" analysis.
 - Write like a wire service reporter (AP, Reuters), not like a blogger or content marketer.
-- Cover the full range of fleet industry news: carrier closures, accidents, regulatory changes, lawsuits, industry events (NAFA, TMC, ATA conferences), vehicle recalls, fleet expansions, executive moves, legislation, labor disputes, fuel market updates, autonomous vehicle developments, cargo theft — anything that affects people who manage fleets.
+- Cover the full range of fleet industry news -- both commercial trucking AND passenger/corporate fleets. This includes: carrier closures, accidents, regulatory changes (FMCSA, NHTSA, DOT, EPA), lawsuits, industry events (NAFA, TMC, ATA, Fleet Forward conferences), vehicle recalls, fleet expansions, executive moves, legislation, labor disputes, fuel market updates, EV adoption, autonomous vehicle developments, cargo theft, fleet electrification, telematics, driver safety, vehicle lifecycle management, remarketing -- anything that affects people who manage fleets of any type.
+- The audience includes trucking fleet managers AND corporate/passenger fleet managers. A story about municipal fleet electrification or corporate vehicle policy is just as relevant as a story about Class 8 freight rates.
 - Do NOT steer every story toward technology. If the news is about a carrier shutting down, report on the carrier shutting down. If the news is about an FMCSA regulation, report on the regulation. Only discuss technology when the source articles are actually about technology.
 - NEVER cite or reference The Fleet Desk, thefleetdesk.com, or any previous Fleet Desk articles. You are writing original reporting from external sources only.
 - Use specific numbers, names, dates, and details from the sources. Vague summaries are not news.
@@ -46,7 +47,7 @@ RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, just raw JSON):
   "slug": "url-friendly-slug-with-hyphens",
   "excerpt": "1-2 sentence factual summary (max 200 chars)",
   "content": "<h2>First Section</h2><p>Content...</p><h2>Second Section</h2><p>Content...</p>",
-  "topic": "One of: Fleet Management & Technology, Regulatory & Compliance, Fleet Safety, Industry Deals, Industry Events",
+  "topic": "One of: Fleet Management & Technology, Regulatory & Compliance, Fleet Safety, Industry Deals, Industry Events, Electric & Alternative Fuel",
   "imageKeywords": ["3-4 specific keywords for finding a relevant news photo, e.g. semi truck highway, FMCSA headquarters, warehouse loading dock"],
   "sources": [
     {

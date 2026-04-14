@@ -282,13 +282,15 @@ export function extractImageKeywords(
   topic: string
 ): string[] {
   const topicKeywords: Record<string, string> = {
-    "Fleet Management & Technology": "fleet truck technology",
-    "Regulatory & Compliance": "trucking regulation highway",
-    "Fleet Safety": "truck driver safety road",
+    "Fleet Management & Technology": "fleet vehicles management technology",
+    "Regulatory & Compliance": "transportation regulation compliance",
+    "Fleet Safety": "fleet driver safety vehicles",
     "Industry Deals": "business deal transportation",
+    "Industry Events": "fleet conference expo",
+    "Electric & Alternative Fuel": "electric vehicle fleet charging",
   };
 
-  const base = topicKeywords[topic] ?? "fleet truck";
+  const base = topicKeywords[topic] ?? "fleet vehicles";
 
   const stopWords = new Set([
     "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
