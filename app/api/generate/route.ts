@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabase/client";
 import { RSS_SOURCES } from "@/lib/rss-sources";
@@ -414,6 +415,10 @@ export async function POST(request: NextRequest) {
           `[Generate] Published: "${article.title}" (${articleId})`
         );
       }
+    }
+
+    if (generatedIds.length > 0) {
+      revalidateTag("articles");
     }
 
     return NextResponse.json({

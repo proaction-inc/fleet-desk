@@ -14,7 +14,10 @@ async function _fetchPublishedArticles(): Promise<Article[]> {
     return [];
   }
 
-  return data ?? [];
+  return (data ?? []).map(a => ({
+    ...a,
+    featured_image_url: a.featured_image_url?.replace(/[\n\r]/g, "").trim() ?? null,
+  }));
 }
 
 export const getPublishedArticles = unstable_cache(
@@ -35,7 +38,11 @@ async function _fetchArticleBySlug(slug: string): Promise<Article | null> {
     return null;
   }
 
-  return data;
+  if (!data) return null;
+  return {
+    ...data,
+    featured_image_url: data.featured_image_url?.replace(/[\n\r]/g, "").trim() ?? null,
+  };
 }
 
 export async function getArticleBySlug(

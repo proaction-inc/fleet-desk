@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "./supabase/client";
 
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY!;
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!.trim();
 
 // Track used source image URLs to prevent the same photo appearing on multiple articles
 const usedSourceImages = new Set<string>();
