@@ -149,17 +149,6 @@ Instructions:
               );
             }
           }
-
-          // Store the complete assistant response
-          await supabaseAdmin.from("article_chats").insert({
-            article_id: articleId,
-            session_id: sessionId,
-            role: "assistant",
-            content: fullResponse,
-          });
-
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
         } catch (error) {
           logAnthropicError("Anthropic stream failed", error);
           controller.enqueue(
@@ -169,7 +158,31 @@ Instructions:
           );
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           controller.close();
+          return;
         }
+
+        try {
+          const { error } = await supabaseAdmin.from("article_chats").insert({
+            article_id: articleId,
+            session_id: sessionId,
+            role: "assistant",
+            content: fullResponse,
+          });
+
+          if (error) {
+            console.error("[Chat] Failed to store assistant response", {
+              code: error.code,
+              message: error.message,
+            });
+          }
+        } catch (error) {
+          console.error("[Chat] Failed to store assistant response", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
       },
     });
 

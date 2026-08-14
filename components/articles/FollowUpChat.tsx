@@ -129,7 +129,10 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
             const t = line.trim();
             if (!t.startsWith("data: ")) continue;
             const data = t.slice(6);
-            if (data === "[DONE]") continue;
+            if (data === "[DONE]") {
+              await reader.cancel().catch(() => undefined);
+              return;
+            }
             try {
               const parsed = JSON.parse(data);
               if (typeof parsed.error === "string") {
@@ -141,6 +144,8 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
                   };
                   return u;
                 });
+                await reader.cancel().catch(() => undefined);
+                return;
               } else if (parsed.text) {
                 setMessages((prev) => {
                   const u = [...prev];
