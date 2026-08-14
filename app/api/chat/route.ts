@@ -6,6 +6,27 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 });
 
+const CHAT_MODEL = process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-5";
+const CHAT_UNAVAILABLE_MESSAGE =
+  "Sorry, the follow-up assistant is temporarily unavailable. Please try again.";
+
+function logAnthropicError(context: string, error: unknown) {
+  if (error instanceof Anthropic.APIError) {
+    console.error(`[Chat] ${context}`, {
+      model: CHAT_MODEL,
+      status: error.status,
+      requestId: error.requestID,
+      message: error.message,
+    });
+    return;
+  }
+
+  console.error(`[Chat] ${context}`, {
+    model: CHAT_MODEL,
+    message: error instanceof Error ? error.message : String(error),
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { articleId, sessionId, message } = await request.json();
@@ -84,12 +105,30 @@ Instructions:
     ];
 
     // Stream the response
-    const stream = await anthropic.messages.stream({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages,
-    });
+    let stream: ReturnType<typeof anthropic.messages.stream>;
+
+    try {
+      const streamResponse = await anthropic.messages
+        .stream({
+          model: CHAT_MODEL,
+          max_tokens: 1024,
+          system: systemPrompt,
+          messages,
+        })
+        .withResponse();
+
+      stream = streamResponse.data;
+      console.log("[Chat] Anthropic stream started", {
+        model: CHAT_MODEL,
+        requestId: streamResponse.request_id,
+      });
+    } catch (error) {
+      logAnthropicError("Anthropic request failed", error);
+      return Response.json(
+        { error: CHAT_UNAVAILABLE_MESSAGE },
+        { status: 502 }
+      );
+    }
 
     // Create a readable stream for the response
     const encoder = new TextEncoder();
@@ -122,8 +161,14 @@ Instructions:
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           controller.close();
         } catch (error) {
-          console.error("Stream error:", error);
-          controller.error(error);
+          logAnthropicError("Anthropic stream failed", error);
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ error: CHAT_UNAVAILABLE_MESSAGE })}\n\n`
+            )
+          );
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
         }
       },
     });

@@ -101,9 +101,14 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
         });
 
         if (!res.ok || !res.body) {
+          const errorBody = await res.json().catch(() => null);
+          const errorMessage =
+            typeof errorBody?.error === "string"
+              ? errorBody.error
+              : "Sorry, something went wrong. Please try again.";
           setMessages((prev) => {
             const u = [...prev];
-            u[u.length - 1] = { role: "assistant", content: "Sorry, something went wrong. Please try again." };
+            u[u.length - 1] = { role: "assistant", content: errorMessage };
             return u;
           });
           setIsStreaming(false);
@@ -127,7 +132,16 @@ export default function FollowUpChat({ articleId }: { articleId: string }) {
             if (data === "[DONE]") continue;
             try {
               const parsed = JSON.parse(data);
-              if (parsed.text) {
+              if (typeof parsed.error === "string") {
+                setMessages((prev) => {
+                  const u = [...prev];
+                  u[u.length - 1] = {
+                    role: "assistant",
+                    content: parsed.error,
+                  };
+                  return u;
+                });
+              } else if (parsed.text) {
                 setMessages((prev) => {
                   const u = [...prev];
                   const last = u[u.length - 1];
