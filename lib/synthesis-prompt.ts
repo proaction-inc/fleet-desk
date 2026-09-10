@@ -37,6 +37,7 @@ STORY SELECTION:
 - Usually reject freight rates, spot markets, contract rates, freight demand, carrier economics, for-hire carrier bankruptcies or closures, broker/shipper/rail/ocean/port/customs/warehouse/logistics real estate stories, and long-haul trucking labor or network stories.
 - Cargo theft, cross-border freight, trucking company M&A, and carrier operations stories are acceptable only when the article can be framed around fleet policy, compliance, vehicle security, insurance, asset protection, maintenance networks, leasing, fleet technology, or corporate/public/service fleet operations.
 - In the sources array, include only the source articles actually used in the final story. Do not cite loosely related cluster items just because they were provided.
+- If none of the source articles can honestly support an in-scope Fleet Desk article, return an explicit skip result instead of inventing a fleet-management angle.
 
 WRITING RULES:
 - Pick the strongest single story in the source cluster and build the article around that story. Drop unrelated source items. Combine multiple sources only when they cover the same company, product, regulation, deal, or tightly related event.
@@ -58,6 +59,7 @@ STRUCTURE:
 
 RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, just raw JSON):
 {
+  "action": "publish",
   "title": "Specific news headline (max 80 chars)",
   "slug": "url-friendly-slug-with-hyphens",
   "excerpt": "1-2 sentence factual summary (max 200 chars)",
@@ -72,5 +74,11 @@ RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, just raw JSON):
       "snippet": "Brief description of what this source contributed"
     }
   ]
+}
+
+If the source cluster is out of scope, respond in exactly this JSON format instead:
+{
+  "action": "skip",
+  "skipReason": "Brief factual reason the provided sources do not fit The Fleet Desk"
 }`;
 }

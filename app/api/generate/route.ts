@@ -14,6 +14,13 @@ const anthropic = new Anthropic({
 // Simple auth token to prevent unauthorized triggers
 const GENERATE_SECRET = process.env.GENERATE_SECRET || "fleet-desk-generate-2026";
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
+const MAX_SYNTHESIS_ATTEMPTS = 15;
+const SYNTHESIS_ATTEMPTS_PER_ARTICLE = 3;
+const GENERATION_TIME_BUDGET_MS = 45_000;
+const MIN_SYNTHESIS_TIME_MS = 5_000;
+const SYNTHESIS_CALL_TIMEOUT_MS = 20_000;
+
+export const maxDuration = 60;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,12 +48,28 @@ interface GeneratedArticle {
   }[];
 }
 
+interface GeneratedArticleToolInput extends Partial<GeneratedArticle> {
+  action?: "publish" | "skip";
+  skipReason?: string;
+}
+
 const ARTICLE_TOOL: Tool = {
   name: "publish_article",
-  description: "Return one generated Fleet Desk article as structured data.",
+  description:
+    "Return one generated Fleet Desk article as structured data, or return a skip result when the source cluster is out of scope.",
   input_schema: {
     type: "object",
     properties: {
+      action: {
+        type: "string",
+        enum: ["publish", "skip"],
+        description:
+          "Use publish for an in-scope article, or skip when the source cluster should not become a Fleet Desk article.",
+      },
+      skipReason: {
+        type: "string",
+        description: "Required when action is skip. Briefly explain why the cluster is out of scope.",
+      },
       title: { type: "string" },
       slug: { type: "string" },
       excerpt: { type: "string" },
@@ -80,7 +103,17 @@ const ARTICLE_TOOL: Tool = {
         },
       },
     },
-    required: ["title", "slug", "excerpt", "content", "topic", "sources"],
+    required: ["action"],
+    oneOf: [
+      {
+        properties: { action: { const: "publish" } },
+        required: ["action", "title", "slug", "excerpt", "content", "topic", "sources"],
+      },
+      {
+        properties: { action: { const: "skip" } },
+        required: ["action", "skipReason"],
+      },
+    ],
   },
 };
 
@@ -175,7 +208,20 @@ function normalizeGeneratedArticle(
     return { article: null, error: "Model returned non-object article data" };
   }
 
-  const raw = input as Partial<GeneratedArticle>;
+  const raw = input as GeneratedArticleToolInput;
+  const action = raw.action || "publish";
+
+  if (action === "skip") {
+    return {
+      article: null,
+      error: `Model skipped cluster: ${raw.skipReason || "source cluster is out of scope"}`,
+    };
+  }
+
+  if (action !== "publish") {
+    return { article: null, error: `Model returned unsupported action: ${String(raw.action)}` };
+  }
+
   if (!raw.title || !raw.excerpt || !raw.content || !raw.topic) {
     return { article: null, error: "Model article missing required text fields" };
   }
@@ -208,43 +254,42 @@ function normalizeGeneratedArticle(
   };
 }
 
-function normalizedClusterText(cluster: RawFeedItem[]): string {
-  return cluster
-    .map((item) => `${item.title} ${item.description} ${item.sourceDomain}`)
-    .join(" ")
-    .toLowerCase();
+function normalizedItemText(item: RawFeedItem): string {
+  return `${item.title} ${item.description} ${item.sourceDomain}`.toLowerCase();
 }
 
 function isDisallowedCluster(cluster: RawFeedItem[]): string | null {
-  const text = normalizedClusterText(cluster);
+  for (const item of cluster) {
+    const text = normalizedItemText(item);
 
-  if (
-    text.includes("enterprise fleet management") &&
-    (text.includes("900,000") || text.includes("900000"))
-  ) {
-    return "near-duplicate Enterprise 900,000-vehicle coverage";
-  }
+    if (
+      text.includes("enterprise fleet management") &&
+      (text.includes("900,000") || text.includes("900000"))
+    ) {
+      return "near-duplicate Enterprise 900,000-vehicle coverage";
+    }
 
-  if (
-    text.includes("pennsylvania") &&
-    text.includes("rta") &&
-    text.includes("fleet management software")
-  ) {
-    return "direct fleet-management software vendor profile";
-  }
+    if (
+      text.includes("pennsylvania") &&
+      /\brta\b/.test(text) &&
+      text.includes("fleet management software")
+    ) {
+      return "direct fleet-management software vendor profile";
+    }
 
-  if (
-    text.includes("cassandra gaines") ||
-    (text.includes("carrier selection") && text.includes("freightwaves"))
-  ) {
-    return "freight-carrier selection story outside Fleet Desk fit";
-  }
+    if (
+      text.includes("cassandra gaines") ||
+      (text.includes("carrier selection") && text.includes("freightwaves"))
+    ) {
+      return "freight-carrier selection story outside Fleet Desk fit";
+    }
 
-  if (
-    text.includes("top logistics fleets") ||
-    text.includes("logistics fleets outperform")
-  ) {
-    return "logistics-carrier benchmark story outside Fleet Desk fit";
+    if (
+      text.includes("top logistics fleets") ||
+      text.includes("logistics fleets outperform")
+    ) {
+      return "logistics-carrier benchmark story outside Fleet Desk fit";
+    }
   }
 
   return null;
@@ -371,7 +416,8 @@ async function storeRawArticles(items: RawFeedItem[]): Promise<void> {
 // ─── Claude Synthesis ─────────────────────────────────────────────────────────
 
 async function synthesizeArticle(
-  cluster: RawFeedItem[]
+  cluster: RawFeedItem[],
+  timeoutMs: number
 ): Promise<{ article: GeneratedArticle | null; error?: string }> {
   const sourceSummaries = cluster
     .map(
@@ -383,13 +429,16 @@ async function synthesizeArticle(
   const prompt = buildSynthesisPrompt(sourceSummaries);
 
   try {
-    const response = await anthropic.messages.create({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 4096,
-      tools: [ARTICLE_TOOL],
-      tool_choice: { type: "tool", name: ARTICLE_TOOL.name },
-      messages: [{ role: "user", content: prompt }],
-    });
+    const response = await anthropic.messages.create(
+      {
+        model: ANTHROPIC_MODEL,
+        max_tokens: 4096,
+        tools: [ARTICLE_TOOL],
+        tool_choice: { type: "tool", name: ARTICLE_TOOL.name },
+        messages: [{ role: "user", content: prompt }],
+      },
+      { timeout: timeoutMs }
+    );
 
     const toolUse = response.content.find(
       (block) => block.type === "tool_use" && block.name === ARTICLE_TOOL.name
@@ -558,10 +607,11 @@ export async function POST(request: NextRequest) {
     // 5. Synthesize articles from top clusters
     const generatedIds: string[] = [];
     const generationErrors: string[] = [];
+    const generationDeadline = Date.now() + GENERATION_TIME_BUDGET_MS;
 
     const maxClusterAttempts = Math.min(
       clusters.length,
-      Math.max(articlesToGenerate * 12, 30)
+      Math.min(articlesToGenerate * SYNTHESIS_ATTEMPTS_PER_ARTICLE, MAX_SYNTHESIS_ATTEMPTS)
     );
 
     for (
@@ -578,11 +628,22 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      const remainingBudgetMs = generationDeadline - Date.now();
+      if (remainingBudgetMs < MIN_SYNTHESIS_TIME_MS) {
+        generationErrors.push(
+          `Stopped after ${i} cluster attempts because the generation time budget was reached`
+        );
+        break;
+      }
+
       console.log(
         `[Generate] Synthesizing article ${i + 1} from ${cluster.length} sources: "${cluster[0]!.title}"`
       );
 
-      const { article, error: synthesisError } = await synthesizeArticle(cluster);
+      const { article, error: synthesisError } = await synthesizeArticle(
+        cluster,
+        Math.min(SYNTHESIS_CALL_TIMEOUT_MS, remainingBudgetMs)
+      );
       if (!article) {
         console.log(`[Generate] Failed to synthesize article ${i + 1}`);
         generationErrors.push(

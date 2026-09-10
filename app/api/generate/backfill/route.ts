@@ -36,6 +36,59 @@ interface GeneratedArticle {
   }[];
 }
 
+interface GeneratedArticleResponse extends Partial<GeneratedArticle> {
+  action?: "publish" | "skip";
+  skipReason?: string;
+}
+
+function normalizeGeneratedArticleResponse(input: unknown): GeneratedArticle | null {
+  if (!input || typeof input !== "object") return null;
+
+  const raw = input as GeneratedArticleResponse;
+  const action = raw.action || "publish";
+
+  if (action === "skip") {
+    console.log(
+      `[Backfill] Model skipped cluster: ${raw.skipReason || "source cluster is out of scope"}`
+    );
+    return null;
+  }
+
+  if (action !== "publish") {
+    console.log(`[Backfill] Unsupported model action: ${String(raw.action)}`);
+    return null;
+  }
+
+  if (
+    !raw.title ||
+    !raw.slug ||
+    !raw.excerpt ||
+    !raw.content ||
+    !raw.topic ||
+    !Array.isArray(raw.sources)
+  ) {
+    console.log("[Backfill] Model article missing required fields");
+    return null;
+  }
+
+  return {
+    title: String(raw.title),
+    slug: String(raw.slug),
+    excerpt: String(raw.excerpt),
+    content: String(raw.content),
+    topic: String(raw.topic),
+    imageKeywords: Array.isArray(raw.imageKeywords)
+      ? raw.imageKeywords.filter((keyword) => typeof keyword === "string")
+      : undefined,
+    sources: raw.sources.map((source) => ({
+      title: String(source.title),
+      url: String(source.url),
+      domain: String(source.domain),
+      snippet: String(source.snippet),
+    })),
+  };
+}
+
 // ─── Google News fetch for date range ─────────────────────────────────────────
 
 const SEARCH_QUERIES = [
@@ -229,7 +282,7 @@ async function synthesizeArticle(
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
-    return JSON.parse(jsonMatch[0]) as GeneratedArticle;
+    return normalizeGeneratedArticleResponse(JSON.parse(jsonMatch[0]));
   } catch (error) {
     console.error("[Backfill] Claude error:", error);
     return null;
