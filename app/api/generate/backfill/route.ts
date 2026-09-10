@@ -10,6 +10,7 @@ const anthropic = new Anthropic({
 
 const GENERATE_SECRET =
   process.env.GENERATE_SECRET || "fleet-desk-generate-2026";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -217,7 +218,7 @@ async function synthesizeArticle(
 
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: ANTHROPIC_MODEL,
       max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import Anthropic from "@anthropic-ai/sdk";
+import type { Tool } from "@anthropic-ai/sdk/resources/messages";
 import { supabaseAdmin } from "@/lib/supabase/client";
 import { RSS_SOURCES } from "@/lib/rss-sources";
 import { buildSynthesisPrompt } from "@/lib/synthesis-prompt";
@@ -12,6 +13,7 @@ const anthropic = new Anthropic({
 
 // Simple auth token to prevent unauthorized triggers
 const GENERATE_SECRET = process.env.GENERATE_SECRET || "fleet-desk-generate-2026";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +40,49 @@ interface GeneratedArticle {
     snippet: string;
   }[];
 }
+
+const ARTICLE_TOOL: Tool = {
+  name: "publish_article",
+  description: "Return one generated Fleet Desk article as structured data.",
+  input_schema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      slug: { type: "string" },
+      excerpt: { type: "string" },
+      content: { type: "string" },
+      topic: {
+        type: "string",
+        enum: [
+          "Fleet Management & Technology",
+          "Regulatory & Compliance",
+          "Fleet Safety",
+          "Industry Deals",
+          "Industry Events",
+          "Electric & Alternative Fuel",
+        ],
+      },
+      imageKeywords: {
+        type: "array",
+        items: { type: "string" },
+      },
+      sources: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            url: { type: "string" },
+            domain: { type: "string" },
+            snippet: { type: "string" },
+          },
+          required: ["title", "url", "domain", "snippet"],
+        },
+      },
+    },
+    required: ["title", "slug", "excerpt", "content", "topic", "sources"],
+  },
+};
 
 // ─── RSS Parsing ──────────────────────────────────────────────────────────────
 
@@ -95,6 +140,114 @@ function cleanHtml(text: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
     .trim();
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 90);
+}
+
+function fallbackSources(cluster: RawFeedItem[]): GeneratedArticle["sources"] {
+  return cluster.map((item) => ({
+    title: item.title,
+    url: item.link,
+    domain: item.sourceDomain,
+    snippet: item.description.slice(0, 240),
+  }));
+}
+
+function domainFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function normalizeGeneratedArticle(
+  input: unknown,
+  cluster: RawFeedItem[]
+): { article: GeneratedArticle | null; error?: string } {
+  if (!input || typeof input !== "object") {
+    return { article: null, error: "Model returned non-object article data" };
+  }
+
+  const raw = input as Partial<GeneratedArticle>;
+  if (!raw.title || !raw.excerpt || !raw.content || !raw.topic) {
+    return { article: null, error: "Model article missing required text fields" };
+  }
+
+  const title = String(raw.title);
+  const sources =
+    Array.isArray(raw.sources) && raw.sources.length > 0
+      ? raw.sources
+          .filter((source) => source && source.url)
+          .map((source) => ({
+            title: String(source.title || source.url),
+            url: String(source.url),
+            domain: String(source.domain || domainFromUrl(String(source.url))),
+            snippet: String(source.snippet || ""),
+          }))
+      : fallbackSources(cluster);
+
+  return {
+    article: {
+      title,
+      slug: raw.slug ? slugify(String(raw.slug)) : slugify(title),
+      excerpt: String(raw.excerpt),
+      content: String(raw.content),
+      topic: String(raw.topic),
+      imageKeywords: Array.isArray(raw.imageKeywords)
+        ? raw.imageKeywords.filter((keyword) => typeof keyword === "string")
+        : extractImageKeywords(title, String(raw.topic)),
+      sources,
+    },
+  };
+}
+
+function normalizedClusterText(cluster: RawFeedItem[]): string {
+  return cluster
+    .map((item) => `${item.title} ${item.description} ${item.sourceDomain}`)
+    .join(" ")
+    .toLowerCase();
+}
+
+function isDisallowedCluster(cluster: RawFeedItem[]): string | null {
+  const text = normalizedClusterText(cluster);
+
+  if (
+    text.includes("enterprise fleet management") &&
+    (text.includes("900,000") || text.includes("900000"))
+  ) {
+    return "near-duplicate Enterprise 900,000-vehicle coverage";
+  }
+
+  if (
+    text.includes("pennsylvania") &&
+    text.includes("rta") &&
+    text.includes("fleet management software")
+  ) {
+    return "direct fleet-management software vendor profile";
+  }
+
+  if (
+    text.includes("cassandra gaines") ||
+    (text.includes("carrier selection") && text.includes("freightwaves"))
+  ) {
+    return "freight-carrier selection story outside Fleet Desk fit";
+  }
+
+  if (
+    text.includes("top logistics fleets") ||
+    text.includes("logistics fleets outperform")
+  ) {
+    return "logistics-carrier benchmark story outside Fleet Desk fit";
+  }
+
+  return null;
 }
 
 // ─── Fetch all RSS feeds ──────────────────────────────────────────────────────
@@ -219,7 +372,7 @@ async function storeRawArticles(items: RawFeedItem[]): Promise<void> {
 
 async function synthesizeArticle(
   cluster: RawFeedItem[]
-): Promise<GeneratedArticle | null> {
+): Promise<{ article: GeneratedArticle | null; error?: string }> {
   const sourceSummaries = cluster
     .map(
       (item, i) =>
@@ -231,10 +384,19 @@ async function synthesizeArticle(
 
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: ANTHROPIC_MODEL,
       max_tokens: 4096,
+      tools: [ARTICLE_TOOL],
+      tool_choice: { type: "tool", name: ARTICLE_TOOL.name },
       messages: [{ role: "user", content: prompt }],
     });
+
+    const toolUse = response.content.find(
+      (block) => block.type === "tool_use" && block.name === ARTICLE_TOOL.name
+    );
+    if (toolUse?.type === "tool_use") {
+      return normalizeGeneratedArticle(toolUse.input, cluster);
+    }
 
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
@@ -243,13 +405,13 @@ async function synthesizeArticle(
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error("Failed to parse Claude response as JSON");
-      return null;
+      return { article: null, error: "Failed to parse model response as JSON" };
     }
 
-    return JSON.parse(jsonMatch[0]) as GeneratedArticle;
+    return normalizeGeneratedArticle(JSON.parse(jsonMatch[0]), cluster);
   } catch (error) {
     console.error("Claude synthesis error:", error);
-    return null;
+    return { article: null, error: String(error) };
   }
 }
 
@@ -395,16 +557,39 @@ export async function POST(request: NextRequest) {
 
     // 5. Synthesize articles from top clusters
     const generatedIds: string[] = [];
+    const generationErrors: string[] = [];
 
-    for (let i = 0; i < Math.min(articlesToGenerate, clusters.length); i++) {
+    const maxClusterAttempts = Math.min(
+      clusters.length,
+      Math.max(articlesToGenerate * 12, 30)
+    );
+
+    for (
+      let i = 0;
+      i < maxClusterAttempts && generatedIds.length < articlesToGenerate;
+      i++
+    ) {
       const cluster = clusters[i]!;
+      const disallowedReason = isDisallowedCluster(cluster);
+      if (disallowedReason) {
+        generationErrors.push(
+          `Article ${i + 1} skipped for "${cluster[0]!.title}": ${disallowedReason}`
+        );
+        continue;
+      }
+
       console.log(
         `[Generate] Synthesizing article ${i + 1} from ${cluster.length} sources: "${cluster[0]!.title}"`
       );
 
-      const article = await synthesizeArticle(cluster);
+      const { article, error: synthesisError } = await synthesizeArticle(cluster);
       if (!article) {
         console.log(`[Generate] Failed to synthesize article ${i + 1}`);
+        generationErrors.push(
+          `Article ${i + 1} synthesis failed for "${cluster[0]!.title}": ${
+            synthesisError || "unknown error"
+          }`
+        );
         continue;
       }
 
@@ -413,6 +598,10 @@ export async function POST(request: NextRequest) {
         generatedIds.push(articleId);
         console.log(
           `[Generate] Published: "${article.title}" (${articleId})`
+        );
+      } else {
+        generationErrors.push(
+          `Article ${i + 1} publish failed for "${article.title}"`
         );
       }
     }
@@ -429,6 +618,8 @@ export async function POST(request: NextRequest) {
       feedItemsFound: rawItems.length,
       newItemsAfterDedup: newItems.length,
       clustersFound: clusters.length,
+      generationErrors,
+      model: ANTHROPIC_MODEL,
     });
   } catch (error) {
     console.error("[Generate] Error:", error);

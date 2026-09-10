@@ -6,6 +6,8 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 });
 
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
+
 export async function POST(request: NextRequest) {
   try {
     const { articleId, sessionId, message } = await request.json();
@@ -85,7 +87,7 @@ Instructions:
 
     // Stream the response
     const stream = await anthropic.messages.stream({
-      model: "claude-sonnet-4-20250514",
+      model: ANTHROPIC_MODEL,
       max_tokens: 1024,
       system: systemPrompt,
       messages,

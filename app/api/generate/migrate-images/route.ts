@@ -12,6 +12,7 @@ const anthropic = new Anthropic({
 
 const GENERATE_SECRET =
   process.env.GENERATE_SECRET || "fleet-desk-generate-2026";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 
 async function getImageKeywordsFromClaude(
   title: string,
@@ -20,7 +21,7 @@ async function getImageKeywordsFromClaude(
 ): Promise<string[]> {
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: ANTHROPIC_MODEL,
       max_tokens: 100,
       messages: [
         {
