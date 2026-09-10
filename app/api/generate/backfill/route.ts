@@ -41,6 +41,46 @@ interface GeneratedArticleResponse extends Partial<GeneratedArticle> {
   skipReason?: string;
 }
 
+function normalizeArticleSources(input: unknown): GeneratedArticle["sources"] | null {
+  if (!Array.isArray(input) || input.length === 0) {
+    return null;
+  }
+
+  const sources: GeneratedArticle["sources"] = [];
+  for (const source of input) {
+    if (!source || typeof source !== "object") {
+      return null;
+    }
+
+    const rawSource = source as Record<string, unknown>;
+    if (
+      typeof rawSource.title !== "string" ||
+      typeof rawSource.url !== "string" ||
+      typeof rawSource.domain !== "string" ||
+      typeof rawSource.snippet !== "string"
+    ) {
+      return null;
+    }
+
+    const title = rawSource.title.trim();
+    const url = rawSource.url.trim();
+    const domain = rawSource.domain.trim();
+
+    if (!title || !url || !domain) {
+      return null;
+    }
+
+    sources.push({
+      title,
+      url,
+      domain,
+      snippet: rawSource.snippet,
+    });
+  }
+
+  return sources;
+}
+
 function normalizeGeneratedArticleResponse(input: unknown): GeneratedArticle | null {
   if (!input || typeof input !== "object") return null;
 
@@ -64,10 +104,15 @@ function normalizeGeneratedArticleResponse(input: unknown): GeneratedArticle | n
     !raw.slug ||
     !raw.excerpt ||
     !raw.content ||
-    !raw.topic ||
-    !Array.isArray(raw.sources)
+    !raw.topic
   ) {
     console.log("[Backfill] Model article missing required fields");
+    return null;
+  }
+
+  const sources = normalizeArticleSources(raw.sources);
+  if (!sources) {
+    console.log("[Backfill] Model article missing usable sources");
     return null;
   }
 
@@ -80,12 +125,7 @@ function normalizeGeneratedArticleResponse(input: unknown): GeneratedArticle | n
     imageKeywords: Array.isArray(raw.imageKeywords)
       ? raw.imageKeywords.filter((keyword) => typeof keyword === "string")
       : undefined,
-    sources: raw.sources.map((source) => ({
-      title: String(source.title),
-      url: String(source.url),
-      domain: String(source.domain),
-      snippet: String(source.snippet),
-    })),
+    sources,
   };
 }
 

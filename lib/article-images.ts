@@ -7,6 +7,21 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!.trim();
 const usedSourceImages = new Set<string>();
 let cacheLoaded = false;
 
+function remainingDeadlineMs(deadlineMs?: number): number {
+  return deadlineMs ? deadlineMs - Date.now() : Number.POSITIVE_INFINITY;
+}
+
+function hasDeadlineBudget(deadlineMs: number | undefined, minimumMs: number): boolean {
+  return remainingDeadlineMs(deadlineMs) >= minimumMs;
+}
+
+function requestTimeoutMs(deadlineMs: number | undefined, fallbackMs: number): number {
+  const remaining = remainingDeadlineMs(deadlineMs);
+  if (!Number.isFinite(remaining)) return fallbackMs;
+
+  return Math.max(1, Math.min(fallbackMs, remaining - 500));
+}
+
 async function loadUsedPhotos(): Promise<void> {
   if (cacheLoaded) return;
 
@@ -36,15 +51,20 @@ async function loadUsedPhotos(): Promise<void> {
  * Extract the og:image from a source article URL.
  * This gets the actual image the publication used for the story.
  */
-export async function extractOgImage(url: string): Promise<string | null> {
+export async function extractOgImage(
+  url: string,
+  deadlineMs?: number
+): Promise<string | null> {
   try {
+    if (!hasDeadlineBudget(deadlineMs, 1_500)) return null;
+
     const response = await fetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (compatible; TheFleetDesk/1.0; +https://thefleetdesk.com)",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, 10_000)),
     });
 
     if (!response.ok) return null;
@@ -84,12 +104,17 @@ export async function extractOgImage(url: string): Promise<string | null> {
 /**
  * Resolve a Google News redirect URL to the actual article URL.
  */
-async function resolveGoogleNewsUrl(url: string): Promise<string | null> {
+async function resolveGoogleNewsUrl(
+  url: string,
+  deadlineMs?: number
+): Promise<string | null> {
   try {
+    if (!hasDeadlineBudget(deadlineMs, 1_500)) return null;
+
     const response = await fetch(url, {
       redirect: "follow",
       headers: { "User-Agent": "Mozilla/5.0 (compatible; TheFleetDesk/1.0)" },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, 10_000)),
     });
     // The final URL after redirects is the real article
     if (response.url && !response.url.includes("news.google.com")) {
@@ -106,19 +131,22 @@ async function resolveGoogleNewsUrl(url: string): Promise<string | null> {
  * Follows Google News redirects and skips already-used images.
  */
 export async function getImageFromSources(
-  sourceUrls: string[]
+  sourceUrls: string[],
+  deadlineMs?: number
 ): Promise<string | null> {
   for (const url of sourceUrls) {
+    if (!hasDeadlineBudget(deadlineMs, 2_500)) return null;
+
     // Resolve Google News redirects to actual article URLs
     let resolvedUrl = url;
     if (url.includes("news.google.com")) {
-      const resolved = await resolveGoogleNewsUrl(url);
+      const resolved = await resolveGoogleNewsUrl(url, deadlineMs);
       if (!resolved) continue;
       resolvedUrl = resolved;
       console.log(`[Images] Resolved Google News → ${resolvedUrl.substring(0, 80)}`);
     }
 
-    const ogImage = await extractOgImage(resolvedUrl);
+    const ogImage = await extractOgImage(resolvedUrl, deadlineMs);
     if (ogImage && ogImage.startsWith("http")) {
       // Normalize URL for comparison (strip query params/resize directives)
       const normalizedOg = ogImage.split("?")[0]!;
@@ -147,22 +175,32 @@ export async function getImageFromSources(
 export async function findAndStoreArticleImage(
   slug: string,
   searchKeywords: string[],
-  sourceUrls?: string[]
+  sourceUrls?: string[],
+  deadlineMs?: number
 ): Promise<{ publicUrl: string; sourceImageUrl: string | null }> {
   try {
+    if (!hasDeadlineBudget(deadlineMs, 2_500)) {
+      console.log(`[Images] Deadline too close for "${slug}", using fallback`);
+      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+    }
+
     await loadUsedPhotos();
+    if (!hasDeadlineBudget(deadlineMs, 2_500)) {
+      console.log(`[Images] Deadline too close after loading image cache for "${slug}", using fallback`);
+      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+    }
 
     let imageUrl: string | null = null;
 
     // 1. Try og:image from sources first
     if (sourceUrls && sourceUrls.length > 0) {
-      imageUrl = await getImageFromSources(sourceUrls);
+      imageUrl = await getImageFromSources(sourceUrls, deadlineMs);
     }
 
     // 2. Fall back to Unsplash search
-    if (!imageUrl) {
+    if (!imageUrl && hasDeadlineBudget(deadlineMs, 3_000)) {
       const query = searchKeywords.join(" ");
-      imageUrl = await searchUnsplashUnique(query);
+      imageUrl = await searchUnsplashUnique(query, deadlineMs);
     }
 
     if (!imageUrl) {
@@ -171,10 +209,15 @@ export async function findAndStoreArticleImage(
     }
 
     // 3. Download the image
-    const imageBuffer = await downloadImage(imageUrl);
+    const imageBuffer = await downloadImage(imageUrl, deadlineMs);
 
     if (!imageBuffer) {
       console.log(`[Images] Failed to download image, using fallback`);
+      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+    }
+
+    if (!hasDeadlineBudget(deadlineMs, 2_000)) {
+      console.log(`[Images] Deadline too close to upload image for "${slug}", using fallback`);
       return { publicUrl: getFallbackImage(), sourceImageUrl: null };
     }
 
@@ -207,8 +250,13 @@ export async function findAndStoreArticleImage(
 
 // ─── Unsplash Search (fallback) ───────────────────────────────────────────────
 
-async function searchUnsplashUnique(query: string): Promise<string | null> {
+async function searchUnsplashUnique(
+  query: string,
+  deadlineMs?: number
+): Promise<string | null> {
   try {
+    if (!hasDeadlineBudget(deadlineMs, 1_500)) return null;
+
     const randomPage = Math.floor(Math.random() * 5) + 1;
 
     const params = new URLSearchParams({
@@ -226,7 +274,7 @@ async function searchUnsplashUnique(query: string): Promise<string | null> {
           Authorization: `Client-ID ${UNSPLASH_ACCESS_KEY}`,
         },
         cache: "no-store",
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, 10_000)),
       }
     );
 
@@ -258,14 +306,19 @@ async function searchUnsplashUnique(query: string): Promise<string | null> {
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-async function downloadImage(url: string): Promise<Buffer | null> {
+async function downloadImage(
+  url: string,
+  deadlineMs?: number
+): Promise<Buffer | null> {
   try {
+    if (!hasDeadlineBudget(deadlineMs, 1_500)) return null;
+
     const response = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; TheFleetDesk/1.0)",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, 15_000)),
     });
 
     if (!response.ok) return null;

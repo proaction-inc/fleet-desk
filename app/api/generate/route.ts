@@ -15,9 +15,13 @@ const anthropic = new Anthropic({
 const GENERATE_SECRET = process.env.GENERATE_SECRET || "fleet-desk-generate-2026";
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 const MAX_SYNTHESIS_ATTEMPTS = 15;
-const SYNTHESIS_ATTEMPTS_PER_ARTICLE = 3;
-const GENERATION_TIME_BUDGET_MS = 45_000;
+const MAX_CLUSTER_SCAN_ATTEMPTS = 30;
+const MIN_CLUSTER_SCAN_ATTEMPTS = 12;
+const CLUSTER_SCAN_ATTEMPTS_PER_ARTICLE = 8;
+const GENERATION_TIME_BUDGET_MS = 52_000;
 const MIN_SYNTHESIS_TIME_MS = 5_000;
+const MIN_PUBLISH_TIME_MS = 8_000;
+const POST_IMAGE_INSERT_RESERVE_MS = 5_000;
 const SYNTHESIS_CALL_TIMEOUT_MS = 20_000;
 
 export const maxDuration = 60;
@@ -104,16 +108,7 @@ const ARTICLE_TOOL: Tool = {
       },
     },
     required: ["action"],
-    oneOf: [
-      {
-        properties: { action: { const: "publish" } },
-        required: ["action", "title", "slug", "excerpt", "content", "topic", "sources"],
-      },
-      {
-        properties: { action: { const: "skip" } },
-        required: ["action", "skipReason"],
-      },
-    ],
+    additionalProperties: false,
   },
 };
 
@@ -183,15 +178,6 @@ function slugify(text: string): string {
     .slice(0, 90);
 }
 
-function fallbackSources(cluster: RawFeedItem[]): GeneratedArticle["sources"] {
-  return cluster.map((item) => ({
-    title: item.title,
-    url: item.link,
-    domain: item.sourceDomain,
-    snippet: item.description.slice(0, 240),
-  }));
-}
-
 function domainFromUrl(url: string): string {
   try {
     return new URL(url).hostname;
@@ -200,9 +186,48 @@ function domainFromUrl(url: string): string {
   }
 }
 
+function normalizeArticleSources(input: unknown): GeneratedArticle["sources"] | null {
+  if (!Array.isArray(input) || input.length === 0) {
+    return null;
+  }
+
+  const sources: GeneratedArticle["sources"] = [];
+  for (const source of input) {
+    if (!source || typeof source !== "object") {
+      return null;
+    }
+
+    const rawSource = source as Record<string, unknown>;
+    if (
+      typeof rawSource.title !== "string" ||
+      typeof rawSource.url !== "string" ||
+      typeof rawSource.domain !== "string" ||
+      typeof rawSource.snippet !== "string"
+    ) {
+      return null;
+    }
+
+    const title = rawSource.title.trim();
+    const url = rawSource.url.trim();
+    const domain = rawSource.domain.trim() || domainFromUrl(url);
+
+    if (!title || !url || !domain) {
+      return null;
+    }
+
+    sources.push({
+      title,
+      url,
+      domain,
+      snippet: rawSource.snippet,
+    });
+  }
+
+  return sources;
+}
+
 function normalizeGeneratedArticle(
-  input: unknown,
-  cluster: RawFeedItem[]
+  input: unknown
 ): { article: GeneratedArticle | null; error?: string } {
   if (!input || typeof input !== "object") {
     return { article: null, error: "Model returned non-object article data" };
@@ -227,17 +252,10 @@ function normalizeGeneratedArticle(
   }
 
   const title = String(raw.title);
-  const sources =
-    Array.isArray(raw.sources) && raw.sources.length > 0
-      ? raw.sources
-          .filter((source) => source && source.url)
-          .map((source) => ({
-            title: String(source.title || source.url),
-            url: String(source.url),
-            domain: String(source.domain || domainFromUrl(String(source.url))),
-            snippet: String(source.snippet || ""),
-          }))
-      : fallbackSources(cluster);
+  const sources = normalizeArticleSources(raw.sources);
+  if (!sources) {
+    return { article: null, error: "Model article missing usable sources" };
+  }
 
   return {
     article: {
@@ -444,7 +462,7 @@ async function synthesizeArticle(
       (block) => block.type === "tool_use" && block.name === ARTICLE_TOOL.name
     );
     if (toolUse?.type === "tool_use") {
-      return normalizeGeneratedArticle(toolUse.input, cluster);
+      return normalizeGeneratedArticle(toolUse.input);
     }
 
     const text =
@@ -457,7 +475,7 @@ async function synthesizeArticle(
       return { article: null, error: "Failed to parse model response as JSON" };
     }
 
-    return normalizeGeneratedArticle(JSON.parse(jsonMatch[0]), cluster);
+    return normalizeGeneratedArticle(JSON.parse(jsonMatch[0]));
   } catch (error) {
     console.error("Claude synthesis error:", error);
     return { article: null, error: String(error) };
@@ -466,14 +484,40 @@ async function synthesizeArticle(
 
 // ─── Publish Article ──────────────────────────────────────────────────────────
 
-async function publishArticle(article: GeneratedArticle): Promise<string | null> {
+function remainingTimeMs(deadlineMs: number): number {
+  return deadlineMs - Date.now();
+}
+
+function hasTimeForArticleAttempt(deadlineMs: number): boolean {
+  return remainingTimeMs(deadlineMs) >= MIN_SYNTHESIS_TIME_MS + MIN_PUBLISH_TIME_MS;
+}
+
+async function publishArticle(
+  article: GeneratedArticle,
+  deadlineMs: number
+): Promise<string | null> {
+  if (remainingTimeMs(deadlineMs) < MIN_PUBLISH_TIME_MS) {
+    console.log(`[Generate] Skipping publish for "${article.title}": request time budget is low`);
+    return null;
+  }
+
   // Find and store a unique, relevant image for this article
   // Priority: og:image from sources > Unsplash search > fallback
   const keywords = article.imageKeywords?.length
     ? article.imageKeywords
     : extractImageKeywords(article.title, article.topic);
   const sourceUrls = article.sources.map((s) => s.url);
-  const { publicUrl, sourceImageUrl } = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
+  const { publicUrl, sourceImageUrl } = await findAndStoreArticleImage(
+    article.slug,
+    keywords,
+    sourceUrls,
+    deadlineMs - POST_IMAGE_INSERT_RESERVE_MS
+  );
+
+  if (remainingTimeMs(deadlineMs) < POST_IMAGE_INSERT_RESERVE_MS) {
+    console.log(`[Generate] Skipping database insert for "${article.title}": request time budget is low`);
+    return null;
+  }
 
   // Insert the article
   const { data: inserted, error } = await supabaseAdmin
@@ -561,6 +605,8 @@ function clusterItems(items: RawFeedItem[]): RawFeedItem[][] {
 // ─── Main Handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  const generationDeadline = Date.now() + GENERATION_TIME_BUDGET_MS;
+
   // Auth check
   const { secret, count } = await request.json().catch(() => ({ secret: "", count: 3 }));
   if (secret !== GENERATE_SECRET) {
@@ -585,6 +631,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (!hasTimeForArticleAttempt(generationDeadline)) {
+      return NextResponse.json({
+        success: true,
+        message: "Feed processing consumed the generation time budget.",
+        articlesGenerated: 0,
+        feedItemsFound: rawItems.length,
+        generationErrors: ["Stopped before deduplication because the generation time budget was reached"],
+        model: ANTHROPIC_MODEL,
+      });
+    }
+
     // 2. Deduplicate
     const newItems = await deduplicateItems(rawItems);
     console.log(`[Generate] ${newItems.length} new items after dedup`);
@@ -597,8 +654,32 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (!hasTimeForArticleAttempt(generationDeadline)) {
+      return NextResponse.json({
+        success: true,
+        message: "Deduplication consumed the generation time budget.",
+        articlesGenerated: 0,
+        feedItemsFound: rawItems.length,
+        newItemsAfterDedup: newItems.length,
+        generationErrors: ["Stopped before storing raw articles because the generation time budget was reached"],
+        model: ANTHROPIC_MODEL,
+      });
+    }
+
     // 3. Store raw articles
     await storeRawArticles(newItems);
+
+    if (!hasTimeForArticleAttempt(generationDeadline)) {
+      return NextResponse.json({
+        success: true,
+        message: "Raw article storage consumed the generation time budget.",
+        articlesGenerated: 0,
+        feedItemsFound: rawItems.length,
+        newItemsAfterDedup: newItems.length,
+        generationErrors: ["Stopped before synthesis because the generation time budget was reached"],
+        model: ANTHROPIC_MODEL,
+      });
+    }
 
     // 4. Cluster related stories
     const clusters = clusterItems(newItems);
@@ -607,11 +688,14 @@ export async function POST(request: NextRequest) {
     // 5. Synthesize articles from top clusters
     const generatedIds: string[] = [];
     const generationErrors: string[] = [];
-    const generationDeadline = Date.now() + GENERATION_TIME_BUDGET_MS;
+    let synthesisAttempts = 0;
 
     const maxClusterAttempts = Math.min(
       clusters.length,
-      Math.min(articlesToGenerate * SYNTHESIS_ATTEMPTS_PER_ARTICLE, MAX_SYNTHESIS_ATTEMPTS)
+      Math.min(
+        Math.max(articlesToGenerate * CLUSTER_SCAN_ATTEMPTS_PER_ARTICLE, MIN_CLUSTER_SCAN_ATTEMPTS),
+        MAX_CLUSTER_SCAN_ATTEMPTS
+      )
     );
 
     for (
@@ -629,9 +713,16 @@ export async function POST(request: NextRequest) {
       }
 
       const remainingBudgetMs = generationDeadline - Date.now();
-      if (remainingBudgetMs < MIN_SYNTHESIS_TIME_MS) {
+      if (remainingBudgetMs < MIN_SYNTHESIS_TIME_MS + MIN_PUBLISH_TIME_MS) {
         generationErrors.push(
           `Stopped after ${i} cluster attempts because the generation time budget was reached`
+        );
+        break;
+      }
+
+      if (synthesisAttempts >= MAX_SYNTHESIS_ATTEMPTS) {
+        generationErrors.push(
+          `Stopped after ${i} cluster attempts because the synthesis attempt limit was reached`
         );
         break;
       }
@@ -640,9 +731,10 @@ export async function POST(request: NextRequest) {
         `[Generate] Synthesizing article ${i + 1} from ${cluster.length} sources: "${cluster[0]!.title}"`
       );
 
+      synthesisAttempts++;
       const { article, error: synthesisError } = await synthesizeArticle(
         cluster,
-        Math.min(SYNTHESIS_CALL_TIMEOUT_MS, remainingBudgetMs)
+        Math.min(SYNTHESIS_CALL_TIMEOUT_MS, remainingBudgetMs - MIN_PUBLISH_TIME_MS)
       );
       if (!article) {
         console.log(`[Generate] Failed to synthesize article ${i + 1}`);
@@ -654,7 +746,14 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      const articleId = await publishArticle(article);
+      if (remainingTimeMs(generationDeadline) < MIN_PUBLISH_TIME_MS) {
+        generationErrors.push(
+          `Article ${i + 1} skipped before publish for "${article.title}": generation time budget was reached`
+        );
+        break;
+      }
+
+      const articleId = await publishArticle(article, generationDeadline);
       if (articleId) {
         generatedIds.push(articleId);
         console.log(
