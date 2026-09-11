@@ -6,7 +6,7 @@ type StoredArticleImageLookup =
   | { status: "not_referenced" }
   | { status: "unknown"; error: unknown };
 
-type StoredImage = Pick<ArticleImageResult, "publicUrl">;
+type StoredImage = Pick<ArticleImageResult, "publicUrl" | "storagePath">;
 
 async function findStoredArticleImageReference(
   column: "id" | "slug",
@@ -55,6 +55,13 @@ export async function recoverArticleInsertWithImage(
   error: unknown
 ): Promise<string | null> {
   console.error(`[${logScope}] Insert error:`, error);
+
+  if (!image.storagePath) {
+    console.warn(
+      `[${logScope}] Insert returned an error for "${article.slug}" with a fallback image; cannot safely verify recovery`
+    );
+    return null;
+  }
 
   const reference = await findStoredArticleImageReferenceBySlug(article.slug, image);
   if (reference.status === "referenced") {
