@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "./supabase/client";
 
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY!;
@@ -9,6 +10,16 @@ const SUPABASE_STORAGE_KEY = (
 const IMAGE_UPLOAD_TIMEOUT_MS = 8_000;
 const IMAGE_UPLOAD_MIN_BUDGET_MS = 2_500;
 const IMAGE_CLEANUP_TIMEOUT_MS = 2_000;
+
+const supabaseStorageCleanup = createClient(SUPABASE_URL, SUPABASE_STORAGE_KEY, {
+  global: {
+    fetch: (input, init) =>
+      fetch(input, {
+        ...init,
+        signal: init?.signal ?? AbortSignal.timeout(IMAGE_CLEANUP_TIMEOUT_MS),
+      }),
+  },
+});
 
 // Track used source image URLs to prevent the same photo appearing on multiple articles
 const usedSourceImages = new Set<string>();
@@ -43,15 +54,13 @@ function requestTimeoutMs(deadlineMs: number | undefined, fallbackMs: number): n
   return Math.max(1, Math.min(fallbackMs, remaining - 500));
 }
 
-function storageObjectUrl(storagePath?: string): string {
+function storageObjectUrl(storagePath: string): string {
   const encodedPath = storagePath
-    ?.split("/")
+    .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/");
 
-  return encodedPath
-    ? `${SUPABASE_URL}/storage/v1/object/article-images/${encodedPath}`
-    : `${SUPABASE_URL}/storage/v1/object/article-images`;
+  return `${SUPABASE_URL}/storage/v1/object/article-images/${encodedPath}`;
 }
 
 function articleImageStoragePath(slug: string): string {
@@ -93,21 +102,12 @@ async function uploadArticleImage(
 
 async function removeStoredArticleImage(storagePath: string): Promise<void> {
   try {
-    // Supabase storage-js removes objects with DELETE /object/{bucket}
-    // and a { prefixes } body; use direct fetch here to keep a cleanup timeout.
-    const response = await fetch(storageObjectUrl(), {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${SUPABASE_STORAGE_KEY}`,
-        apikey: SUPABASE_STORAGE_KEY,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ prefixes: [storagePath] }),
-      signal: AbortSignal.timeout(IMAGE_CLEANUP_TIMEOUT_MS),
-    });
+    const { error } = await supabaseStorageCleanup.storage
+      .from("article-images")
+      .remove([storagePath]);
 
-    if (!response.ok) {
-      console.error(`[Images] Cleanup error: ${response.status} ${response.statusText}`);
+    if (error) {
+      console.error(`[Images] Cleanup error: ${error.message}`);
     }
   } catch (error) {
     console.error(`[Images] Cleanup error:`, error);
@@ -115,10 +115,15 @@ async function removeStoredArticleImage(storagePath: string): Promise<void> {
 }
 
 export async function cleanupStoredArticleImage(
-  image: Pick<ArticleImageResult, "storagePath">
+  image: Pick<ArticleImageResult, "sourceImageUrl" | "storagePath">
 ): Promise<void> {
-  if (!image.storagePath) return;
-  await removeStoredArticleImage(image.storagePath);
+  if (image.sourceImageUrl) {
+    usedSourceImages.delete(image.sourceImageUrl);
+  }
+
+  if (image.storagePath) {
+    await removeStoredArticleImage(image.storagePath);
+  }
 }
 
 async function loadUsedPhotos(): Promise<void> {

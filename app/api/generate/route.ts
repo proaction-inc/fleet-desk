@@ -9,7 +9,9 @@ import {
   cleanupStoredArticleImage,
   extractImageKeywords,
   findAndStoreArticleImage,
+  type ArticleImageResult,
 } from "@/lib/article-images";
+import { findStoredArticleImageReferenceBySlug } from "@/lib/article-image-references";
 import {
   normalizeGeneratedArticleSources,
   type GeneratedArticleSource,
@@ -447,6 +449,33 @@ function hasTimeForArticleAttempt(deadlineMs: number): boolean {
   return remainingTimeMs(deadlineMs) >= MIN_SYNTHESIS_TIME_MS + MIN_PUBLISH_TIME_MS;
 }
 
+async function recoverArticleInsertError(
+  article: GeneratedArticle,
+  image: ArticleImageResult,
+  error: unknown
+): Promise<string | null> {
+  console.error("Failed to insert article:", error);
+
+  const reference = await findStoredArticleImageReferenceBySlug(article.slug, image);
+  if (reference.status === "referenced") {
+    console.warn(
+      `[Generate] Insert returned an error but "${article.slug}" exists with the uploaded image; preserving it`
+    );
+    return reference.articleId;
+  }
+
+  if (reference.status === "unknown") {
+    console.error(
+      `[Generate] Could not verify failed insert for "${article.slug}", preserving uploaded image`,
+      reference.error
+    );
+    return null;
+  }
+
+  await cleanupStoredArticleImage(image);
+  return null;
+}
+
 async function publishArticle(
   article: GeneratedArticle,
   deadlineMs: number
@@ -475,29 +504,38 @@ async function publishArticle(
     return null;
   }
 
-  // Insert the article
-  const { data: inserted, error } = await supabaseAdmin
-    .from("articles")
-    .insert({
-      title: article.title,
-      slug: article.slug,
-      content: article.content,
-      excerpt: article.excerpt,
-      topic: article.topic,
-      author: "The Fleet Desk",
-      published: true,
-      published_at: new Date().toISOString(),
-      featured_image_url: image.publicUrl,
-      source_image_url: image.sourceImageUrl,
-      source_count: article.sources.length,
-    })
-    .select("id")
-    .single();
+  let inserted: { id: string } | null = null;
+  try {
+    // Insert the article
+    const { data, error } = await supabaseAdmin
+      .from("articles")
+      .insert({
+        title: article.title,
+        slug: article.slug,
+        content: article.content,
+        excerpt: article.excerpt,
+        topic: article.topic,
+        author: "The Fleet Desk",
+        published: true,
+        published_at: new Date().toISOString(),
+        featured_image_url: image.publicUrl,
+        source_image_url: image.sourceImageUrl,
+        source_count: article.sources.length,
+      })
+      .select("id")
+      .single();
 
-  if (error) {
-    console.error("Failed to insert article:", error);
-    await cleanupStoredArticleImage(image);
-    return null;
+    if (error) {
+      const recoveredId = await recoverArticleInsertError(article, image, error);
+      if (!recoveredId) return null;
+      inserted = { id: recoveredId };
+    } else {
+      inserted = data;
+    }
+  } catch (error) {
+    const recoveredId = await recoverArticleInsertError(article, image, error);
+    if (!recoveredId) return null;
+    inserted = { id: recoveredId };
   }
 
   // Insert sources

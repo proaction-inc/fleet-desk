@@ -5,7 +5,9 @@ import {
   cleanupStoredArticleImage,
   findAndStoreArticleImage,
   resetUsedPhotosCache,
+  type ArticleImageResult,
 } from "@/lib/article-images";
+import { findStoredArticleImageReferenceById } from "@/lib/article-image-references";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -14,6 +16,34 @@ const anthropic = new Anthropic({
 const GENERATE_SECRET =
   process.env.GENERATE_SECRET || "fleet-desk-generate-2026";
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
+
+async function didArticleImageUpdatePersist(
+  articleId: string,
+  articleSlug: string,
+  image: ArticleImageResult,
+  error: unknown
+): Promise<"persisted" | "not_persisted" | "unknown"> {
+  console.error(`[Migrate] Update error for ${articleSlug}:`, error);
+
+  const reference = await findStoredArticleImageReferenceById(articleId, image);
+  if (reference.status === "referenced") {
+    console.warn(
+      `[Migrate] Update returned an error but ${articleSlug} references the uploaded image; preserving it`
+    );
+    return "persisted";
+  }
+
+  if (reference.status === "unknown") {
+    console.error(
+      `[Migrate] Could not verify failed update for ${articleSlug}, preserving uploaded image`,
+      reference.error
+    );
+    return "unknown";
+  }
+
+  await cleanupStoredArticleImage(image);
+  return "not_persisted";
+}
 
 async function getImageKeywordsFromClaude(
   title: string,
@@ -110,17 +140,41 @@ export async function POST(request: NextRequest) {
       );
 
       if (image.storagePath) {
-        const { error: updateError } = await supabaseAdmin
-          .from("articles")
-          .update({
-            featured_image_url: image.publicUrl,
-            source_image_url: image.sourceImageUrl,
-          })
-          .eq("id", article.id);
+        let updateStatus: "persisted" | "not_persisted" | "unknown" = "not_persisted";
+        try {
+          const { error: updateError } = await supabaseAdmin
+            .from("articles")
+            .update({
+              featured_image_url: image.publicUrl,
+              source_image_url: image.sourceImageUrl,
+            })
+            .eq("id", article.id);
 
-        if (updateError) {
-          await cleanupStoredArticleImage(image);
-          throw updateError;
+          if (updateError) {
+            updateStatus = await didArticleImageUpdatePersist(
+              article.id,
+              article.slug,
+              image,
+              updateError
+            );
+          } else {
+            updateStatus = "persisted";
+          }
+        } catch (error) {
+          updateStatus = await didArticleImageUpdatePersist(
+            article.id,
+            article.slug,
+            image,
+            error
+          );
+        }
+
+        if (updateStatus === "not_persisted") {
+          throw new Error(`Failed to update article image for ${article.slug}`);
+        }
+
+        if (updateStatus === "unknown") {
+          throw new Error(`Could not verify image update for ${article.slug}`);
         }
 
         results.push({ slug: article.slug, status: "migrated" });
