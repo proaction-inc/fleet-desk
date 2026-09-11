@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
             })
             .eq("id", article.id)
             .select("id, featured_image_url")
-            .maybeSingle();
+            .single();
 
           if (updateError) {
             updateStatus = await didArticleImageUpdatePersist(

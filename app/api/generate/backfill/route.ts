@@ -3,12 +3,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabase/client";
 import { buildSynthesisPrompt } from "@/lib/synthesis-prompt";
 import {
-  cleanupStoredArticleImage,
   extractImageKeywords,
   findAndStoreArticleImage,
-  type ArticleImageResult,
 } from "@/lib/article-images";
-import { findStoredArticleImageReferenceBySlug } from "@/lib/article-image-references";
+import { recoverArticleInsertWithImage } from "@/lib/article-image-references";
 import {
   normalizeGeneratedArticleSources,
   type GeneratedArticleSource,
@@ -296,33 +294,6 @@ async function synthesizeArticle(
 
 // ─── Publish ──────────────────────────────────────────────────────────────────
 
-async function recoverArticleInsertError(
-  article: GeneratedArticle,
-  image: ArticleImageResult,
-  error: unknown
-): Promise<string | null> {
-  console.error("[Backfill] Insert error:", error);
-
-  const reference = await findStoredArticleImageReferenceBySlug(article.slug, image);
-  if (reference.status === "referenced") {
-    console.warn(
-      `[Backfill] Insert returned an error but "${article.slug}" exists with the uploaded image; preserving it`
-    );
-    return reference.articleId;
-  }
-
-  if (reference.status === "unknown") {
-    console.error(
-      `[Backfill] Could not verify failed insert for "${article.slug}", preserving uploaded image`,
-      reference.error
-    );
-    return null;
-  }
-
-  await cleanupStoredArticleImage(image);
-  return null;
-}
-
 async function publishArticle(
   article: GeneratedArticle,
   publishDate: string
@@ -369,14 +340,14 @@ async function publishArticle(
       .single();
 
     if (error) {
-      const recoveredId = await recoverArticleInsertError(article, image, error);
+      const recoveredId = await recoverArticleInsertWithImage("Backfill", article, image, error);
       if (!recoveredId) return null;
       inserted = { id: recoveredId };
     } else {
       inserted = data;
     }
   } catch (error) {
-    const recoveredId = await recoverArticleInsertError(article, image, error);
+    const recoveredId = await recoverArticleInsertWithImage("Backfill", article, image, error);
     if (!recoveredId) return null;
     inserted = { id: recoveredId };
   }

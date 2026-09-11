@@ -1,4 +1,4 @@
-import type { ArticleImageResult } from "./article-images";
+import { cleanupStoredArticleImage, type ArticleImageResult } from "./article-images";
 import { supabaseAdmin } from "./supabase/client";
 
 type StoredArticleImageLookup =
@@ -50,4 +50,32 @@ export function findStoredArticleImageReferenceById(
   image: StoredImage
 ): Promise<StoredArticleImageLookup> {
   return findStoredArticleImageReference("id", id, image);
+}
+
+export async function recoverArticleInsertWithImage(
+  logScope: string,
+  article: { slug: string },
+  image: ArticleImageResult,
+  error: unknown
+): Promise<string | null> {
+  console.error(`[${logScope}] Insert error:`, error);
+
+  const reference = await findStoredArticleImageReferenceBySlug(article.slug, image);
+  if (reference.status === "referenced") {
+    console.warn(
+      `[${logScope}] Insert returned an error but "${article.slug}" exists with the uploaded image; preserving it`
+    );
+    return reference.articleId;
+  }
+
+  if (reference.status === "unknown") {
+    console.error(
+      `[${logScope}] Could not verify failed insert for "${article.slug}", preserving uploaded image`,
+      reference.error
+    );
+    return null;
+  }
+
+  await cleanupStoredArticleImage(image);
+  return null;
 }

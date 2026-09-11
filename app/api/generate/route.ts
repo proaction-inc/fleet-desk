@@ -9,9 +9,8 @@ import {
   cleanupStoredArticleImage,
   extractImageKeywords,
   findAndStoreArticleImage,
-  type ArticleImageResult,
 } from "@/lib/article-images";
-import { findStoredArticleImageReferenceBySlug } from "@/lib/article-image-references";
+import { recoverArticleInsertWithImage } from "@/lib/article-image-references";
 import {
   normalizeGeneratedArticleSources,
   type GeneratedArticleSource,
@@ -449,33 +448,6 @@ function hasTimeForArticleAttempt(deadlineMs: number): boolean {
   return remainingTimeMs(deadlineMs) >= MIN_SYNTHESIS_TIME_MS + MIN_PUBLISH_TIME_MS;
 }
 
-async function recoverArticleInsertError(
-  article: GeneratedArticle,
-  image: ArticleImageResult,
-  error: unknown
-): Promise<string | null> {
-  console.error("Failed to insert article:", error);
-
-  const reference = await findStoredArticleImageReferenceBySlug(article.slug, image);
-  if (reference.status === "referenced") {
-    console.warn(
-      `[Generate] Insert returned an error but "${article.slug}" exists with the uploaded image; preserving it`
-    );
-    return reference.articleId;
-  }
-
-  if (reference.status === "unknown") {
-    console.error(
-      `[Generate] Could not verify failed insert for "${article.slug}", preserving uploaded image`,
-      reference.error
-    );
-    return null;
-  }
-
-  await cleanupStoredArticleImage(image);
-  return null;
-}
-
 async function publishArticle(
   article: GeneratedArticle,
   deadlineMs: number
@@ -526,14 +498,14 @@ async function publishArticle(
       .single();
 
     if (error) {
-      const recoveredId = await recoverArticleInsertError(article, image, error);
+      const recoveredId = await recoverArticleInsertWithImage("Generate", article, image, error);
       if (!recoveredId) return null;
       inserted = { id: recoveredId };
     } else {
       inserted = data;
     }
   } catch (error) {
-    const recoveredId = await recoverArticleInsertError(article, image, error);
+    const recoveredId = await recoverArticleInsertWithImage("Generate", article, image, error);
     if (!recoveredId) return null;
     inserted = { id: recoveredId };
   }
