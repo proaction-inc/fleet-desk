@@ -6,6 +6,10 @@ import { supabaseAdmin } from "@/lib/supabase/client";
 import { RSS_SOURCES } from "@/lib/rss-sources";
 import { buildSynthesisPrompt } from "@/lib/synthesis-prompt";
 import { findAndStoreArticleImage, extractImageKeywords } from "@/lib/article-images";
+import {
+  normalizeGeneratedArticleSources,
+  type GeneratedArticleSource,
+} from "@/lib/generated-article-sources";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -44,12 +48,7 @@ interface GeneratedArticle {
   content: string;
   topic: string;
   imageKeywords?: string[];
-  sources: {
-    title: string;
-    url: string;
-    domain: string;
-    snippet: string;
-  }[];
+  sources: GeneratedArticleSource[];
 }
 
 interface GeneratedArticleToolInput extends Partial<GeneratedArticle> {
@@ -178,54 +177,6 @@ function slugify(text: string): string {
     .slice(0, 90);
 }
 
-function domainFromUrl(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "";
-  }
-}
-
-function normalizeArticleSources(input: unknown): GeneratedArticle["sources"] | null {
-  if (!Array.isArray(input) || input.length === 0) {
-    return null;
-  }
-
-  const sources: GeneratedArticle["sources"] = [];
-  for (const source of input) {
-    if (!source || typeof source !== "object") {
-      return null;
-    }
-
-    const rawSource = source as Record<string, unknown>;
-    if (
-      typeof rawSource.title !== "string" ||
-      typeof rawSource.url !== "string" ||
-      typeof rawSource.domain !== "string" ||
-      typeof rawSource.snippet !== "string"
-    ) {
-      return null;
-    }
-
-    const title = rawSource.title.trim();
-    const url = rawSource.url.trim();
-    const domain = rawSource.domain.trim() || domainFromUrl(url);
-
-    if (!title || !url || !domain) {
-      return null;
-    }
-
-    sources.push({
-      title,
-      url,
-      domain,
-      snippet: rawSource.snippet,
-    });
-  }
-
-  return sources;
-}
-
 function normalizeGeneratedArticle(
   input: unknown
 ): { article: GeneratedArticle | null; error?: string } {
@@ -252,7 +203,7 @@ function normalizeGeneratedArticle(
   }
 
   const title = String(raw.title);
-  const sources = normalizeArticleSources(raw.sources);
+  const sources = normalizeGeneratedArticleSources(raw.sources);
   if (!sources) {
     return { article: null, error: "Model article missing usable sources" };
   }
