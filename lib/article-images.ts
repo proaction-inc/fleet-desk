@@ -1,11 +1,130 @@
+import { randomUUID } from "crypto";
+import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "./supabase/client";
 
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY!;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!.trim();
+const SUPABASE_STORAGE_KEY = (
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+).trim();
+const IMAGE_UPLOAD_TIMEOUT_MS = 8_000;
+const IMAGE_UPLOAD_MIN_BUDGET_MS = 2_500;
+const IMAGE_CLEANUP_TIMEOUT_MS = 2_000;
+
+const supabaseStorageCleanup = createClient(SUPABASE_URL, SUPABASE_STORAGE_KEY, {
+  global: {
+    fetch: (input, init) =>
+      fetch(input, {
+        ...init,
+        signal: init?.signal ?? AbortSignal.timeout(IMAGE_CLEANUP_TIMEOUT_MS),
+      }),
+  },
+});
 
 // Track used source image URLs to prevent the same photo appearing on multiple articles
 const usedSourceImages = new Set<string>();
 let cacheLoaded = false;
+
+export interface ArticleImageResult {
+  publicUrl: string;
+  sourceImageUrl: string | null;
+  storagePath: string | null;
+}
+
+function fallbackImageResult(): ArticleImageResult {
+  return {
+    publicUrl: getFallbackImage(),
+    sourceImageUrl: null,
+    storagePath: null,
+  };
+}
+
+function remainingDeadlineMs(deadlineMs?: number): number {
+  return deadlineMs ? deadlineMs - Date.now() : Number.POSITIVE_INFINITY;
+}
+
+function hasDeadlineBudget(deadlineMs: number | undefined, minimumMs: number): boolean {
+  return remainingDeadlineMs(deadlineMs) >= minimumMs;
+}
+
+function requestTimeoutMs(deadlineMs: number | undefined, fallbackMs: number): number {
+  const remaining = remainingDeadlineMs(deadlineMs);
+  if (!Number.isFinite(remaining)) return fallbackMs;
+
+  return Math.max(1, Math.min(fallbackMs, remaining - 500));
+}
+
+function storageObjectUrl(storagePath: string): string {
+  const encodedPath = storagePath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+  return `${SUPABASE_URL}/storage/v1/object/article-images/${encodedPath}`;
+}
+
+function articleImageStoragePath(slug: string): string {
+  return `articles/${slug}-${randomUUID()}.jpg`;
+}
+
+async function uploadArticleImage(
+  storagePath: string,
+  imageBuffer: Buffer,
+  deadlineMs?: number
+): Promise<boolean> {
+  try {
+    if (!hasDeadlineBudget(deadlineMs, IMAGE_UPLOAD_MIN_BUDGET_MS)) return false;
+
+    const response = await fetch(storageObjectUrl(storagePath), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SUPABASE_STORAGE_KEY}`,
+        apikey: SUPABASE_STORAGE_KEY,
+        "cache-control": "max-age=3600",
+        "content-type": "image/jpeg",
+        "x-upsert": "false",
+      },
+      body: imageBuffer as unknown as BodyInit,
+      signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, IMAGE_UPLOAD_TIMEOUT_MS)),
+    });
+
+    if (!response.ok) {
+      console.error(`[Images] Upload error: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error(`[Images] Upload error:`, error);
+    return false;
+  }
+}
+
+async function removeStoredArticleImage(storagePath: string): Promise<void> {
+  try {
+    const { error } = await supabaseStorageCleanup.storage
+      .from("article-images")
+      .remove([storagePath]);
+
+    if (error) {
+      console.error(`[Images] Cleanup error: ${error.message}`);
+    }
+  } catch (error) {
+    console.error(`[Images] Cleanup error:`, error);
+  }
+}
+
+export async function cleanupStoredArticleImage(
+  image: Pick<ArticleImageResult, "sourceImageUrl" | "storagePath">
+): Promise<void> {
+  if (image.sourceImageUrl) {
+    usedSourceImages.delete(image.sourceImageUrl);
+  }
+
+  if (image.storagePath) {
+    await removeStoredArticleImage(image.storagePath);
+  }
+}
 
 async function loadUsedPhotos(): Promise<void> {
   if (cacheLoaded) return;
@@ -36,15 +155,20 @@ async function loadUsedPhotos(): Promise<void> {
  * Extract the og:image from a source article URL.
  * This gets the actual image the publication used for the story.
  */
-export async function extractOgImage(url: string): Promise<string | null> {
+export async function extractOgImage(
+  url: string,
+  deadlineMs?: number
+): Promise<string | null> {
   try {
+    if (!hasDeadlineBudget(deadlineMs, 1_500)) return null;
+
     const response = await fetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (compatible; TheFleetDesk/1.0; +https://thefleetdesk.com)",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, 10_000)),
     });
 
     if (!response.ok) return null;
@@ -84,12 +208,17 @@ export async function extractOgImage(url: string): Promise<string | null> {
 /**
  * Resolve a Google News redirect URL to the actual article URL.
  */
-async function resolveGoogleNewsUrl(url: string): Promise<string | null> {
+async function resolveGoogleNewsUrl(
+  url: string,
+  deadlineMs?: number
+): Promise<string | null> {
   try {
+    if (!hasDeadlineBudget(deadlineMs, 1_500)) return null;
+
     const response = await fetch(url, {
       redirect: "follow",
       headers: { "User-Agent": "Mozilla/5.0 (compatible; TheFleetDesk/1.0)" },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, 10_000)),
     });
     // The final URL after redirects is the real article
     if (response.url && !response.url.includes("news.google.com")) {
@@ -106,19 +235,22 @@ async function resolveGoogleNewsUrl(url: string): Promise<string | null> {
  * Follows Google News redirects and skips already-used images.
  */
 export async function getImageFromSources(
-  sourceUrls: string[]
+  sourceUrls: string[],
+  deadlineMs?: number
 ): Promise<string | null> {
   for (const url of sourceUrls) {
+    if (!hasDeadlineBudget(deadlineMs, 2_500)) return null;
+
     // Resolve Google News redirects to actual article URLs
     let resolvedUrl = url;
     if (url.includes("news.google.com")) {
-      const resolved = await resolveGoogleNewsUrl(url);
+      const resolved = await resolveGoogleNewsUrl(url, deadlineMs);
       if (!resolved) continue;
       resolvedUrl = resolved;
       console.log(`[Images] Resolved Google News → ${resolvedUrl.substring(0, 80)}`);
     }
 
-    const ogImage = await extractOgImage(resolvedUrl);
+    const ogImage = await extractOgImage(resolvedUrl, deadlineMs);
     if (ogImage && ogImage.startsWith("http")) {
       // Normalize URL for comparison (strip query params/resize directives)
       const normalizedOg = ogImage.split("?")[0]!;
@@ -141,55 +273,70 @@ export async function getImageFromSources(
  * 2. Search Unsplash with keywords (fallback)
  * 3. Hardcoded fallback image (last resort)
  *
- * Returns { publicUrl, sourceImageUrl } so the caller can persist
- * sourceImageUrl to the articles table for cross-run dedup.
+ * Returns the public URL plus storage path so callers can delete the
+ * uploaded object if the article write later fails.
  */
 export async function findAndStoreArticleImage(
   slug: string,
   searchKeywords: string[],
-  sourceUrls?: string[]
-): Promise<{ publicUrl: string; sourceImageUrl: string | null }> {
+  sourceUrls?: string[],
+  deadlineMs?: number
+): Promise<ArticleImageResult> {
   try {
+    if (!hasDeadlineBudget(deadlineMs, 2_500)) {
+      console.log(`[Images] Deadline too close for "${slug}", using fallback`);
+      return fallbackImageResult();
+    }
+
     await loadUsedPhotos();
+    if (!hasDeadlineBudget(deadlineMs, 2_500)) {
+      console.log(`[Images] Deadline too close after loading image cache for "${slug}", using fallback`);
+      return fallbackImageResult();
+    }
 
     let imageUrl: string | null = null;
 
     // 1. Try og:image from sources first
     if (sourceUrls && sourceUrls.length > 0) {
-      imageUrl = await getImageFromSources(sourceUrls);
+      imageUrl = await getImageFromSources(sourceUrls, deadlineMs);
     }
 
     // 2. Fall back to Unsplash search
-    if (!imageUrl) {
+    if (!imageUrl && hasDeadlineBudget(deadlineMs, 3_000)) {
       const query = searchKeywords.join(" ");
-      imageUrl = await searchUnsplashUnique(query);
+      imageUrl = await searchUnsplashUnique(query, deadlineMs);
     }
 
     if (!imageUrl) {
       console.log(`[Images] No image found for "${slug}", using fallback`);
-      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+      return fallbackImageResult();
     }
 
     // 3. Download the image
-    const imageBuffer = await downloadImage(imageUrl);
+    const imageBuffer = await downloadImage(imageUrl, deadlineMs);
 
     if (!imageBuffer) {
       console.log(`[Images] Failed to download image, using fallback`);
-      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+      return fallbackImageResult();
+    }
+
+    if (!hasDeadlineBudget(deadlineMs, 2_000)) {
+      console.log(`[Images] Deadline too close to upload image for "${slug}", using fallback`);
+      return fallbackImageResult();
     }
 
     // 4. Upload to Supabase Storage
-    const storagePath = `articles/${slug}.jpg`;
-    const { error } = await supabaseAdmin.storage
-      .from("article-images")
-      .upload(storagePath, imageBuffer, {
-        contentType: "image/jpeg",
-        upsert: true,
-      });
+    const storagePath = articleImageStoragePath(slug);
+    const uploaded = await uploadArticleImage(storagePath, imageBuffer, deadlineMs);
 
-    if (error) {
-      console.error(`[Images] Upload error:`, error);
-      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+    if (!uploaded) {
+      return fallbackImageResult();
+    }
+
+    if (!hasDeadlineBudget(deadlineMs, 500)) {
+      console.log(`[Images] Deadline passed after image upload for "${slug}", removing stored image`);
+      await removeStoredArticleImage(storagePath);
+      return fallbackImageResult();
     }
 
     // 5. Track the source URL (normalized) so it won't be reused
@@ -198,17 +345,22 @@ export async function findAndStoreArticleImage(
 
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/article-images/${storagePath}`;
     console.log(`[Images] Stored image for "${slug}"`);
-    return { publicUrl, sourceImageUrl: normalizedSource };
+    return { publicUrl, sourceImageUrl: normalizedSource, storagePath };
   } catch (error) {
     console.error(`[Images] Error:`, error);
-    return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+    return fallbackImageResult();
   }
 }
 
 // ─── Unsplash Search (fallback) ───────────────────────────────────────────────
 
-async function searchUnsplashUnique(query: string): Promise<string | null> {
+async function searchUnsplashUnique(
+  query: string,
+  deadlineMs?: number
+): Promise<string | null> {
   try {
+    if (!hasDeadlineBudget(deadlineMs, 1_500)) return null;
+
     const randomPage = Math.floor(Math.random() * 5) + 1;
 
     const params = new URLSearchParams({
@@ -226,7 +378,7 @@ async function searchUnsplashUnique(query: string): Promise<string | null> {
           Authorization: `Client-ID ${UNSPLASH_ACCESS_KEY}`,
         },
         cache: "no-store",
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, 10_000)),
       }
     );
 
@@ -258,14 +410,19 @@ async function searchUnsplashUnique(query: string): Promise<string | null> {
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-async function downloadImage(url: string): Promise<Buffer | null> {
+async function downloadImage(
+  url: string,
+  deadlineMs?: number
+): Promise<Buffer | null> {
   try {
+    if (!hasDeadlineBudget(deadlineMs, 1_500)) return null;
+
     const response = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; TheFleetDesk/1.0)",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, 15_000)),
     });
 
     if (!response.ok) return null;

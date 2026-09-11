@@ -7,8 +7,12 @@ export default function ThemeToggle() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    setDark(document.documentElement.classList.contains("dark"));
+    const frame = requestAnimationFrame(() => {
+      setMounted(true);
+      setDark(document.documentElement.classList.contains("dark"));
+    });
+
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   function toggle() {

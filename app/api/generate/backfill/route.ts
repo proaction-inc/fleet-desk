@@ -2,7 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabase/client";
 import { buildSynthesisPrompt } from "@/lib/synthesis-prompt";
-import { findAndStoreArticleImage, extractImageKeywords } from "@/lib/article-images";
+import {
+  extractImageKeywords,
+  findAndStoreArticleImage,
+} from "@/lib/article-images";
+import { recoverArticleInsertWithImage } from "@/lib/article-image-references";
+import {
+  normalizeGeneratedArticleSources,
+  type GeneratedArticleSource,
+} from "@/lib/generated-article-sources";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -10,6 +18,7 @@ const anthropic = new Anthropic({
 
 const GENERATE_SECRET =
   process.env.GENERATE_SECRET || "fleet-desk-generate-2026";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,12 +36,60 @@ interface GeneratedArticle {
   content: string;
   topic: string;
   imageKeywords?: string[];
-  sources: {
-    title: string;
-    url: string;
-    domain: string;
-    snippet: string;
-  }[];
+  sources: GeneratedArticleSource[];
+}
+
+interface GeneratedArticleResponse extends Partial<GeneratedArticle> {
+  action?: "publish" | "skip";
+  skipReason?: string;
+}
+
+function normalizeGeneratedArticleResponse(input: unknown): GeneratedArticle | null {
+  if (!input || typeof input !== "object") return null;
+
+  const raw = input as GeneratedArticleResponse;
+  const action = raw.action || "publish";
+
+  if (action === "skip") {
+    console.log(
+      `[Backfill] Model skipped cluster: ${raw.skipReason || "source cluster is out of scope"}`
+    );
+    return null;
+  }
+
+  if (action !== "publish") {
+    console.log(`[Backfill] Unsupported model action: ${String(raw.action)}`);
+    return null;
+  }
+
+  if (
+    !raw.title ||
+    !raw.slug ||
+    !raw.excerpt ||
+    !raw.content ||
+    !raw.topic
+  ) {
+    console.log("[Backfill] Model article missing required fields");
+    return null;
+  }
+
+  const sources = normalizeGeneratedArticleSources(raw.sources);
+  if (!sources) {
+    console.log("[Backfill] Model article missing usable sources");
+    return null;
+  }
+
+  return {
+    title: String(raw.title),
+    slug: String(raw.slug),
+    excerpt: String(raw.excerpt),
+    content: String(raw.content),
+    topic: String(raw.topic),
+    imageKeywords: Array.isArray(raw.imageKeywords)
+      ? raw.imageKeywords.filter((keyword) => typeof keyword === "string")
+      : undefined,
+    sources,
+  };
 }
 
 // ─── Google News fetch for date range ─────────────────────────────────────────
@@ -217,7 +274,7 @@ async function synthesizeArticle(
 
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: ANTHROPIC_MODEL,
       max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     });
@@ -228,7 +285,7 @@ async function synthesizeArticle(
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
-    return JSON.parse(jsonMatch[0]) as GeneratedArticle;
+    return normalizeGeneratedArticleResponse(JSON.parse(jsonMatch[0]));
   } catch (error) {
     console.error("[Backfill] Claude error:", error);
     return null;
@@ -258,31 +315,41 @@ async function publishArticle(
     ? article.imageKeywords
     : extractImageKeywords(article.title, article.topic);
   const sourceUrls = article.sources.map((s) => s.url);
-  const { publicUrl, sourceImageUrl } = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
+  const image = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
 
-  const { data: inserted, error } = await supabaseAdmin
-    .from("articles")
-    .insert({
-      title: article.title,
-      slug: article.slug,
-      content: article.content,
-      excerpt: article.excerpt,
-      topic: article.topic,
-      author: "The Fleet Desk",
-      published: true,
-      published_at: publishDate,
-      featured_image_url: publicUrl,
-      source_image_url: sourceImageUrl,
-      source_count: article.sources.length,
-      created_at: publishDate,
-      updated_at: publishDate,
-    })
-    .select("id")
-    .single();
+  let inserted: { id: string } | null = null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("articles")
+      .insert({
+        title: article.title,
+        slug: article.slug,
+        content: article.content,
+        excerpt: article.excerpt,
+        topic: article.topic,
+        author: "The Fleet Desk",
+        published: true,
+        published_at: publishDate,
+        featured_image_url: image.publicUrl,
+        source_image_url: image.sourceImageUrl,
+        source_count: article.sources.length,
+        created_at: publishDate,
+        updated_at: publishDate,
+      })
+      .select("id")
+      .single();
 
-  if (error) {
-    console.error("[Backfill] Insert error:", error);
-    return null;
+    if (error) {
+      const recoveredId = await recoverArticleInsertWithImage("Backfill", article, image, error);
+      if (!recoveredId) return null;
+      inserted = { id: recoveredId };
+    } else {
+      inserted = data;
+    }
+  } catch (error) {
+    const recoveredId = await recoverArticleInsertWithImage("Backfill", article, image, error);
+    if (!recoveredId) return null;
+    inserted = { id: recoveredId };
   }
 
   if (inserted) {
