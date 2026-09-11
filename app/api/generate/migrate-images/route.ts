@@ -142,14 +142,14 @@ export async function POST(request: NextRequest) {
       if (image.storagePath) {
         let updateStatus: "persisted" | "not_persisted" | "unknown" = "not_persisted";
         try {
-          const { data: updatedArticle, error: updateError } = await supabaseAdmin
+          const { error: updateError } = await supabaseAdmin
             .from("articles")
             .update({
               featured_image_url: image.publicUrl,
               source_image_url: image.sourceImageUrl,
             })
             .eq("id", article.id)
-            .select("id, featured_image_url")
+            .select("id")
             .single();
 
           if (updateError) {
@@ -159,13 +159,8 @@ export async function POST(request: NextRequest) {
               image,
               updateError
             );
-          } else if (updatedArticle?.featured_image_url === image.publicUrl) {
-            updateStatus = "persisted";
           } else {
-            console.warn(
-              `[Migrate] Update matched no article for ${article.slug}; cleaning up uploaded image`
-            );
-            await cleanupStoredArticleImage(image);
+            updateStatus = "persisted";
           }
         } catch (error) {
           updateStatus = await didArticleImageUpdatePersist(

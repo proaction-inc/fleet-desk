@@ -6,17 +6,13 @@ type StoredArticleImageLookup =
   | { status: "not_referenced" }
   | { status: "unknown"; error: unknown };
 
-type StoredImage = Pick<ArticleImageResult, "publicUrl" | "storagePath">;
+type StoredImage = Pick<ArticleImageResult, "publicUrl">;
 
 async function findStoredArticleImageReference(
   column: "id" | "slug",
   value: string,
   image: StoredImage
 ): Promise<StoredArticleImageLookup> {
-  if (!image.storagePath) {
-    return { status: "not_referenced" };
-  }
-
   try {
     const { data, error } = await supabaseAdmin
       .from("articles")
