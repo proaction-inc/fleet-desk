@@ -2,6 +2,12 @@ import { supabaseAdmin } from "./supabase/client";
 
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY!;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!.trim();
+const SUPABASE_STORAGE_KEY = (
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+).trim();
+const IMAGE_UPLOAD_TIMEOUT_MS = 8_000;
+const IMAGE_UPLOAD_MIN_BUDGET_MS = 2_500;
+const IMAGE_CLEANUP_TIMEOUT_MS = 2_000;
 
 // Track used source image URLs to prevent the same photo appearing on multiple articles
 const usedSourceImages = new Set<string>();
@@ -20,6 +26,71 @@ function requestTimeoutMs(deadlineMs: number | undefined, fallbackMs: number): n
   if (!Number.isFinite(remaining)) return fallbackMs;
 
   return Math.max(1, Math.min(fallbackMs, remaining - 500));
+}
+
+function storageObjectUrl(storagePath?: string): string {
+  const encodedPath = storagePath
+    ?.split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+  return encodedPath
+    ? `${SUPABASE_URL}/storage/v1/object/article-images/${encodedPath}`
+    : `${SUPABASE_URL}/storage/v1/object/article-images`;
+}
+
+async function uploadArticleImage(
+  storagePath: string,
+  imageBuffer: Buffer,
+  deadlineMs?: number
+): Promise<boolean> {
+  try {
+    if (!hasDeadlineBudget(deadlineMs, IMAGE_UPLOAD_MIN_BUDGET_MS)) return false;
+
+    const response = await fetch(storageObjectUrl(storagePath), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SUPABASE_STORAGE_KEY}`,
+        apikey: SUPABASE_STORAGE_KEY,
+        "cache-control": "max-age=3600",
+        "content-type": "image/jpeg",
+        "x-upsert": "true",
+      },
+      body: imageBuffer as unknown as BodyInit,
+      signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, IMAGE_UPLOAD_TIMEOUT_MS)),
+    });
+
+    if (!response.ok) {
+      console.error(`[Images] Upload error: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error(`[Images] Upload error:`, error);
+    return false;
+  }
+}
+
+async function removeStoredArticleImage(storagePath: string): Promise<void> {
+  try {
+    const response = await fetch(storageObjectUrl(), {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${SUPABASE_STORAGE_KEY}`,
+        apikey: SUPABASE_STORAGE_KEY,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ prefixes: [storagePath] }),
+      signal: AbortSignal.timeout(IMAGE_CLEANUP_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      console.error(`[Images] Cleanup error: ${response.status} ${response.statusText}`);
+    }
+  } catch (error) {
+    console.error(`[Images] Cleanup error:`, error);
+  }
 }
 
 async function loadUsedPhotos(): Promise<void> {
@@ -223,15 +294,15 @@ export async function findAndStoreArticleImage(
 
     // 4. Upload to Supabase Storage
     const storagePath = `articles/${slug}.jpg`;
-    const { error } = await supabaseAdmin.storage
-      .from("article-images")
-      .upload(storagePath, imageBuffer, {
-        contentType: "image/jpeg",
-        upsert: true,
-      });
+    const uploaded = await uploadArticleImage(storagePath, imageBuffer, deadlineMs);
 
-    if (error) {
-      console.error(`[Images] Upload error:`, error);
+    if (!uploaded) {
+      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+    }
+
+    if (!hasDeadlineBudget(deadlineMs, 500)) {
+      console.log(`[Images] Deadline passed after image upload for "${slug}", removing stored image`);
+      await removeStoredArticleImage(storagePath);
       return { publicUrl: getFallbackImage(), sourceImageUrl: null };
     }
 
