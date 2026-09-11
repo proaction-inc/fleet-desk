@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { supabaseAdmin } from "./supabase/client";
 
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY!;
@@ -39,6 +40,10 @@ function storageObjectUrl(storagePath?: string): string {
     : `${SUPABASE_URL}/storage/v1/object/article-images`;
 }
 
+function articleImageStoragePath(slug: string): string {
+  return `articles/${slug}-${randomUUID()}.jpg`;
+}
+
 async function uploadArticleImage(
   storagePath: string,
   imageBuffer: Buffer,
@@ -54,7 +59,7 @@ async function uploadArticleImage(
         apikey: SUPABASE_STORAGE_KEY,
         "cache-control": "max-age=3600",
         "content-type": "image/jpeg",
-        "x-upsert": "true",
+        "x-upsert": "false",
       },
       body: imageBuffer as unknown as BodyInit,
       signal: AbortSignal.timeout(requestTimeoutMs(deadlineMs, IMAGE_UPLOAD_TIMEOUT_MS)),
@@ -74,6 +79,8 @@ async function uploadArticleImage(
 
 async function removeStoredArticleImage(storagePath: string): Promise<void> {
   try {
+    // Supabase storage-js removes objects with DELETE /object/{bucket}
+    // and a { prefixes } body; use direct fetch here to keep a cleanup timeout.
     const response = await fetch(storageObjectUrl(), {
       method: "DELETE",
       headers: {
@@ -293,7 +300,7 @@ export async function findAndStoreArticleImage(
     }
 
     // 4. Upload to Supabase Storage
-    const storagePath = `articles/${slug}.jpg`;
+    const storagePath = articleImageStoragePath(slug);
     const uploaded = await uploadArticleImage(storagePath, imageBuffer, deadlineMs);
 
     if (!uploaded) {

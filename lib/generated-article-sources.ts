@@ -5,11 +5,16 @@ export interface GeneratedArticleSource {
   snippet: string;
 }
 
-function domainFromUrl(url: string): string {
+function parseHttpUrl(url: string): URL | null {
   try {
-    return new URL(url).hostname;
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+
+    return parsed;
   } catch {
-    return "";
+    return null;
   }
 }
 
@@ -38,16 +43,17 @@ export function normalizeGeneratedArticleSources(
 
     const title = rawSource.title.trim();
     const url = rawSource.url.trim();
-    const domain = rawSource.domain.trim() || domainFromUrl(url);
+    const parsedUrl = parseHttpUrl(url);
+    const domain = rawSource.domain.trim() || parsedUrl?.hostname || "";
     const snippet = rawSource.snippet.trim();
 
-    if (!title || !url || !domain) {
+    if (!title || !parsedUrl || !domain) {
       return null;
     }
 
     sources.push({
       title,
-      url,
+      url: parsedUrl.href,
       domain,
       snippet,
     });
