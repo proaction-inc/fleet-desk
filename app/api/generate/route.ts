@@ -734,7 +734,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (generatedIds.length > 0) {
-      revalidateTag("articles", "seconds");
+      revalidateTag("articles", { expire: 0 });
     }
 
     return NextResponse.json({
