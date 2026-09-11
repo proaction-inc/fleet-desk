@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabase/client";
 import {
+  cleanupStoredArticleImage,
   findAndStoreArticleImage,
   resetUsedPhotosCache,
 } from "@/lib/article-images";
@@ -102,17 +103,25 @@ export async function POST(request: NextRequest) {
         `[Migrate] ${article.slug} → ${sourceUrls.length} source URLs, keywords: ${keywords.slice(0, 2).join(", ")}`
       );
 
-      const { publicUrl: newUrl, sourceImageUrl } = await findAndStoreArticleImage(
+      const image = await findAndStoreArticleImage(
         article.slug,
         keywords,
         sourceUrls
       );
 
-      if (newUrl && newUrl.includes("supabase.co/storage")) {
-        await supabaseAdmin
+      if (image.storagePath) {
+        const { error: updateError } = await supabaseAdmin
           .from("articles")
-          .update({ featured_image_url: newUrl, source_image_url: sourceImageUrl })
+          .update({
+            featured_image_url: image.publicUrl,
+            source_image_url: image.sourceImageUrl,
+          })
           .eq("id", article.id);
+
+        if (updateError) {
+          await cleanupStoredArticleImage(image);
+          throw updateError;
+        }
 
         results.push({ slug: article.slug, status: "migrated" });
         console.log(`[Migrate] ✓ ${article.slug}`);

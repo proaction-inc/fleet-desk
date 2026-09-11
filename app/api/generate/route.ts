@@ -5,7 +5,11 @@ import type { Tool } from "@anthropic-ai/sdk/resources/messages";
 import { supabaseAdmin } from "@/lib/supabase/client";
 import { RSS_SOURCES } from "@/lib/rss-sources";
 import { buildSynthesisPrompt } from "@/lib/synthesis-prompt";
-import { findAndStoreArticleImage, extractImageKeywords } from "@/lib/article-images";
+import {
+  cleanupStoredArticleImage,
+  extractImageKeywords,
+  findAndStoreArticleImage,
+} from "@/lib/article-images";
 import {
   normalizeGeneratedArticleSources,
   type GeneratedArticleSource,
@@ -458,7 +462,7 @@ async function publishArticle(
     ? article.imageKeywords
     : extractImageKeywords(article.title, article.topic);
   const sourceUrls = article.sources.map((s) => s.url);
-  const { publicUrl, sourceImageUrl } = await findAndStoreArticleImage(
+  const image = await findAndStoreArticleImage(
     article.slug,
     keywords,
     sourceUrls,
@@ -467,6 +471,7 @@ async function publishArticle(
 
   if (remainingTimeMs(deadlineMs) < POST_IMAGE_INSERT_RESERVE_MS) {
     console.log(`[Generate] Skipping database insert for "${article.title}": request time budget is low`);
+    await cleanupStoredArticleImage(image);
     return null;
   }
 
@@ -482,8 +487,8 @@ async function publishArticle(
       author: "The Fleet Desk",
       published: true,
       published_at: new Date().toISOString(),
-      featured_image_url: publicUrl,
-      source_image_url: sourceImageUrl,
+      featured_image_url: image.publicUrl,
+      source_image_url: image.sourceImageUrl,
       source_count: article.sources.length,
     })
     .select("id")
@@ -491,6 +496,7 @@ async function publishArticle(
 
   if (error) {
     console.error("Failed to insert article:", error);
+    await cleanupStoredArticleImage(image);
     return null;
   }
 

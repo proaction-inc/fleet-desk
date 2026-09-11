@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabase/client";
 import { buildSynthesisPrompt } from "@/lib/synthesis-prompt";
-import { findAndStoreArticleImage, extractImageKeywords } from "@/lib/article-images";
+import {
+  cleanupStoredArticleImage,
+  extractImageKeywords,
+  findAndStoreArticleImage,
+} from "@/lib/article-images";
 import {
   normalizeGeneratedArticleSources,
   type GeneratedArticleSource,
@@ -311,7 +315,7 @@ async function publishArticle(
     ? article.imageKeywords
     : extractImageKeywords(article.title, article.topic);
   const sourceUrls = article.sources.map((s) => s.url);
-  const { publicUrl, sourceImageUrl } = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
+  const image = await findAndStoreArticleImage(article.slug, keywords, sourceUrls);
 
   const { data: inserted, error } = await supabaseAdmin
     .from("articles")
@@ -324,8 +328,8 @@ async function publishArticle(
       author: "The Fleet Desk",
       published: true,
       published_at: publishDate,
-      featured_image_url: publicUrl,
-      source_image_url: sourceImageUrl,
+      featured_image_url: image.publicUrl,
+      source_image_url: image.sourceImageUrl,
       source_count: article.sources.length,
       created_at: publishDate,
       updated_at: publishDate,
@@ -335,6 +339,7 @@ async function publishArticle(
 
   if (error) {
     console.error("[Backfill] Insert error:", error);
+    await cleanupStoredArticleImage(image);
     return null;
   }
 

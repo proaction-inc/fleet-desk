@@ -14,6 +14,20 @@ const IMAGE_CLEANUP_TIMEOUT_MS = 2_000;
 const usedSourceImages = new Set<string>();
 let cacheLoaded = false;
 
+export interface ArticleImageResult {
+  publicUrl: string;
+  sourceImageUrl: string | null;
+  storagePath: string | null;
+}
+
+function fallbackImageResult(): ArticleImageResult {
+  return {
+    publicUrl: getFallbackImage(),
+    sourceImageUrl: null,
+    storagePath: null,
+  };
+}
+
 function remainingDeadlineMs(deadlineMs?: number): number {
   return deadlineMs ? deadlineMs - Date.now() : Number.POSITIVE_INFINITY;
 }
@@ -98,6 +112,13 @@ async function removeStoredArticleImage(storagePath: string): Promise<void> {
   } catch (error) {
     console.error(`[Images] Cleanup error:`, error);
   }
+}
+
+export async function cleanupStoredArticleImage(
+  image: Pick<ArticleImageResult, "storagePath">
+): Promise<void> {
+  if (!image.storagePath) return;
+  await removeStoredArticleImage(image.storagePath);
 }
 
 async function loadUsedPhotos(): Promise<void> {
@@ -247,25 +268,25 @@ export async function getImageFromSources(
  * 2. Search Unsplash with keywords (fallback)
  * 3. Hardcoded fallback image (last resort)
  *
- * Returns { publicUrl, sourceImageUrl } so the caller can persist
- * sourceImageUrl to the articles table for cross-run dedup.
+ * Returns the public URL plus storage path so callers can delete the
+ * uploaded object if the article write later fails.
  */
 export async function findAndStoreArticleImage(
   slug: string,
   searchKeywords: string[],
   sourceUrls?: string[],
   deadlineMs?: number
-): Promise<{ publicUrl: string; sourceImageUrl: string | null }> {
+): Promise<ArticleImageResult> {
   try {
     if (!hasDeadlineBudget(deadlineMs, 2_500)) {
       console.log(`[Images] Deadline too close for "${slug}", using fallback`);
-      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+      return fallbackImageResult();
     }
 
     await loadUsedPhotos();
     if (!hasDeadlineBudget(deadlineMs, 2_500)) {
       console.log(`[Images] Deadline too close after loading image cache for "${slug}", using fallback`);
-      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+      return fallbackImageResult();
     }
 
     let imageUrl: string | null = null;
@@ -283,7 +304,7 @@ export async function findAndStoreArticleImage(
 
     if (!imageUrl) {
       console.log(`[Images] No image found for "${slug}", using fallback`);
-      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+      return fallbackImageResult();
     }
 
     // 3. Download the image
@@ -291,12 +312,12 @@ export async function findAndStoreArticleImage(
 
     if (!imageBuffer) {
       console.log(`[Images] Failed to download image, using fallback`);
-      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+      return fallbackImageResult();
     }
 
     if (!hasDeadlineBudget(deadlineMs, 2_000)) {
       console.log(`[Images] Deadline too close to upload image for "${slug}", using fallback`);
-      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+      return fallbackImageResult();
     }
 
     // 4. Upload to Supabase Storage
@@ -304,13 +325,13 @@ export async function findAndStoreArticleImage(
     const uploaded = await uploadArticleImage(storagePath, imageBuffer, deadlineMs);
 
     if (!uploaded) {
-      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+      return fallbackImageResult();
     }
 
     if (!hasDeadlineBudget(deadlineMs, 500)) {
       console.log(`[Images] Deadline passed after image upload for "${slug}", removing stored image`);
       await removeStoredArticleImage(storagePath);
-      return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+      return fallbackImageResult();
     }
 
     // 5. Track the source URL (normalized) so it won't be reused
@@ -319,10 +340,10 @@ export async function findAndStoreArticleImage(
 
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/article-images/${storagePath}`;
     console.log(`[Images] Stored image for "${slug}"`);
-    return { publicUrl, sourceImageUrl: normalizedSource };
+    return { publicUrl, sourceImageUrl: normalizedSource, storagePath };
   } catch (error) {
     console.error(`[Images] Error:`, error);
-    return { publicUrl: getFallbackImage(), sourceImageUrl: null };
+    return fallbackImageResult();
   }
 }
 
